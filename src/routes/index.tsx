@@ -6,6 +6,7 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -14,6 +15,7 @@ import {
   ExternalLink,
   Eye,
   Instagram,
+  Layers,
   LayoutGrid,
   Link2,
   List,
@@ -25,9 +27,11 @@ import {
   Plus,
   Send,
   Settings2,
+  ShieldCheck,
   Sparkles,
   Upload,
   X,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -49,8 +53,10 @@ import { signIn, signOut, useSession } from "@/lib/auth-client";
 import { getAccounts, connectAccount, disconnectAccount, getZernioConnectUrl } from "@/api/accounts";
 import { getPosts } from "@/api/posts";
 import { uploadPosterDataUrl } from "@/api/posters";
+import { uploadBrandLogo } from "@/api/brand-kit";
 import { renderPosterCanvas } from "@/lib/posterCanvas";
 import { REGEX, generatePostersSchema } from "@/lib/validators";
+import { LandingPage } from "@/components/LandingPage";
 
 type Page = "Home" | "Create" | "Scheduled" | "Posted" | "Brand kit" | "Accounts" | "Settings";
 
@@ -160,6 +166,7 @@ export interface BrandKitData {
   colors: string[];
   font: string;
   logoName?: string | undefined;
+  logoUrl?: string | undefined;
 }
 
 const initialOptions: PosterOption[] = [];
@@ -230,25 +237,14 @@ function PostPilot() {
     });
   };
 
-  // Decoupled account state per Google user
-  const [connectedAccounts, setConnectedAccounts] = useState<{ platform: string; handle: string }[]>(() => {
-    if (isMeetSoni) {
-      return [{ platform: "Instagram", handle: "avero.innovations" }];
-    }
-    return [];
-  });
+  // Decoupled account state per Google user (loaded directly from database)
+  const [connectedAccounts, setConnectedAccounts] = useState<{ platform: string; handle: string }[]>([]);
 
   // Keep in sync whenever activeUser changes or DB accounts return
   useEffect(() => {
     if (!activeUser) return;
 
-    if (activeUser.email === "meetsoni1075@gmail.com") {
-      setConnectedAccounts([{ platform: "Instagram", handle: "avero.innovations" }]);
-      setBusinessName("Avero Innovations");
-    } else {
-      setConnectedAccounts([]);
-      setBusinessName(activeUser.name ? `${activeUser.name}'s Workspace` : "My Workspace");
-    }
+    setBusinessName(activeUser.name ? `${activeUser.name}'s Workspace` : "My Workspace");
 
     getAccounts()
       .then((res: any) => {
@@ -259,10 +255,12 @@ function PostPilot() {
             setBusinessName(biz);
           }
           if (Array.isArray(accs)) {
-            const mapped = accs.map((a: any) => ({
-              platform: a.platform,
-              handle: a.platform_handle || (isMeetSoni && a.platform === "Instagram" ? "avero.innovations" : (a.platform || "Connected")),
-            }));
+            const mapped = accs
+              .filter((a: any) => a.status === "connected")
+              .map((a: any) => ({
+                platform: a.platform,
+                handle: a.platform_handle || a.platform || "Connected",
+              }));
             setConnectedAccounts(mapped);
           }
         }
@@ -382,7 +380,13 @@ function PostPilot() {
               onClick={() => setBusinessMenuOpen(!businessMenuOpen)}
               aria-expanded={businessMenuOpen}
             >
-              <span className="flex h-6 w-6 items-center justify-center rounded bg-primary/10 text-[11px] font-semibold text-primary">{businessInitial}</span>
+              {brandKit.logoUrl ? (
+                <div className="h-6 w-6 rounded overflow-hidden border border-primary/20 bg-white p-0.5 shrink-0 flex items-center justify-center">
+                  <img src={brandKit.logoUrl} alt="Logo" className="h-full w-full object-contain" />
+                </div>
+              ) : (
+                <span className="flex h-6 w-6 items-center justify-center rounded bg-primary/10 text-[11px] font-semibold text-primary">{businessInitial}</span>
+              )}
               <span className="font-medium">{businessName}</span>
               <span className="rounded border bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">Active</span>
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
@@ -886,37 +890,99 @@ function cleanCaptionDisplay(caption?: string): string {
   return caption;
 }
 
+export function getHeadingFontFamily(font?: string): string {
+  if (!font) return "var(--font-display)";
+  const normalized = font.toLowerCase().trim();
+  if (normalized.includes("dm serif")) {
+    return "'DM Serif Display', Georgia, serif";
+  }
+  if (normalized.includes("work sans")) {
+    return "'Work Sans', -apple-system, BlinkMacSystemFont, sans-serif";
+  }
+  return "'Fraunces', Georgia, serif";
+}
+
 function Poster({
   theme,
   eyebrow,
   headline,
   price,
+  dateText,
   footer,
   selected = false,
   imageUrl,
+  logoUrl,
+  font,
+  needsReview = false,
 }: {
   theme: string;
   eyebrow: string;
   headline: string;
   price: string;
+  dateText?: string | undefined;
   footer: string;
   selected?: boolean;
   imageUrl?: string | undefined;
+  logoUrl?: string | undefined;
+  font?: string | undefined;
+  needsReview?: boolean | undefined;
 }) {
+  const isWorkSans = font?.toLowerCase().includes("work sans");
+
+  if (imageUrl) {
+    return (
+      <div
+        className={`poster ${selected ? "ring-2 ring-primary ring-offset-2" : ""} relative overflow-hidden bg-muted group rounded-md shadow-xs aspect-[4/5]`}
+      >
+        <img
+          src={imageUrl}
+          alt={headline || "Finished flyer"}
+          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+        />
+        {needsReview && (
+          <div className="absolute top-2 left-2 z-20 flex items-center gap-1 rounded-full bg-amber-500/95 px-2.5 py-1 text-[10px] font-semibold text-white shadow-md backdrop-blur-xs">
+            <span>⚠️</span> Needs Review
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
-      className={`poster poster--${theme} ${selected ? "ring-2 ring-primary ring-offset-2" : ""} relative overflow-hidden`}
-      style={imageUrl ? { backgroundImage: `url(${imageUrl})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+      className={`poster poster--${theme} ${selected ? "ring-2 ring-primary ring-offset-2" : ""} relative overflow-hidden flex flex-col justify-between p-5 text-center`}
     >
-      {imageUrl && <div className="absolute inset-0 bg-black/45 z-0" />}
-      <p className="poster__top relative z-10">{eyebrow}</p>
-      <div className="relative z-10">
-        <div className="poster__ornament" />
-        <p className="poster__title">{headline}</p>
-        <div className="poster__ornament" />
-        {price && <p className="poster__price">{price}</p>}
+      {logoUrl && (
+        <div className="absolute top-2.5 right-2.5 z-20 flex h-7 w-7 items-center justify-center rounded-full bg-white/95 p-1 shadow-md border border-black/10 backdrop-blur-xs">
+          <img src={logoUrl} alt="Logo" className="h-full w-full object-contain" />
+        </div>
+      )}
+      <p className="poster__top relative z-10 text-[0.62rem] font-bold tracking-[0.14em] uppercase">{eyebrow}</p>
+      <div className="relative z-10 my-auto py-2">
+        <div className="poster__ornament mx-auto mb-2 w-8 h-[1px] bg-current opacity-40" />
+        <p
+          className="poster__title"
+          style={{
+            fontFamily: getHeadingFontFamily(font),
+            fontWeight: isWorkSans ? 700 : 500,
+            fontSize: "clamp(1.1rem, 2.2vw, 1.7rem)",
+            lineHeight: 1.15,
+            wordBreak: "normal",
+            overflowWrap: "break-word",
+            hyphens: "none",
+          }}
+        >
+          {headline}
+        </p>
+        <div className="poster__ornament mx-auto mt-2 mb-2 w-8 h-[1px] bg-current opacity-40" />
+        {dateText && (
+          <span className="poster__date mb-1 inline-block rounded-full bg-black/10 px-2 py-0.5 text-[0.62rem] font-bold uppercase tracking-wider dark:bg-white/10">
+            {dateText}
+          </span>
+        )}
+        {price && <p className="poster__price font-bold text-base mt-1">{price}</p>}
       </div>
-      <p className="poster__foot relative z-10">{footer}</p>
+      <p className="poster__foot relative z-10 text-[0.58rem] font-semibold tracking-[0.12em] uppercase">{footer}</p>
     </div>
   );
 }
@@ -1046,12 +1112,13 @@ function CreateFlow({
     setLoading(true);
     setStep(2);
     try {
-      const results = await generatePosters(prompt, style, useBrand, brandKit);
+      const results = await generatePosters(prompt, style, useBrand, brandKit, 2);
       setOptions(results);
       setSelected(0);
       setHeadline(results[0]?.headline ?? "");
       setPrice(results[0]?.price ?? "");
-      setDateText(new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }).toUpperCase());
+      const detectedDate = results[0]?.brief?.date_text || results[0]?.date_text;
+      setDateText(detectedDate || new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }).toUpperCase());
     } finally {
       setLoading(false);
     }
@@ -1059,12 +1126,14 @@ function CreateFlow({
   const regenerate = async () => {
     setLoading(true);
     try {
-      const results = await generatePosters(prompt, style, useBrand, brandKit);
+      const results = await generatePosters(prompt, style, useBrand, brandKit, 2);
       setOptions(results);
-      setSelected((selected + 1) % results.length);
-      setHeadline(results[(selected + 1) % results.length]?.headline ?? "");
-      setPrice(results[(selected + 1) % results.length]?.price ?? "");
-      toast.success("Four fresh layouts are ready");
+      setSelected(0);
+      setHeadline(results[0]?.headline ?? "");
+      setPrice(results[0]?.price ?? "");
+      const detectedDate = results[0]?.brief?.date_text || results[0]?.date_text;
+      if (detectedDate) setDateText(detectedDate);
+      toast.success("Two fresh layouts are ready");
     } finally { setLoading(false); }
   };
   const loadSuggestions = async () => {
@@ -1123,6 +1192,8 @@ function CreateFlow({
           headline,
           price,
           footer: currentOption?.footer ?? brandKit.tagline ?? "IDEAS INTO SCALABLE PRODUCTS",
+          logoUrl: brandKit.logoUrl,
+          font: brandKit.font,
         });
         const uploadRes = await uploadPosterDataUrl({ data: { dataUrl } });
         if (uploadRes?.success && uploadRes.publicUrl) {
@@ -1160,9 +1231,9 @@ function CreateFlow({
     <div className="mb-7 flex items-center justify-between gap-3"><div><button className="mb-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={onCancel}><ArrowLeft className="h-3.5 w-3.5" /> Back to workspace</button><h1 className="font-display text-4xl">Create a post</h1></div><span className="hidden text-xs text-muted-foreground sm:inline">A little idea can go a long way.</span></div>
     <div className="mb-8 grid grid-cols-3 border-y" aria-label="Post creation steps">{steps.map((label, index) => <button key={label} onClick={() => index + 1 <= step && setStep(index + 1)} className={`relative flex items-center gap-2.5 py-3 text-left text-xs transition-colors ${step === index + 1 ? "font-semibold text-foreground" : step > index + 1 ? "text-primary" : "text-muted-foreground"}`} aria-current={step === index + 1 ? "step" : undefined}><span className={`flex h-6 w-6 items-center justify-center rounded-full border text-[11px] ${step === index + 1 ? "border-primary bg-primary text-primary-foreground" : step > index + 1 ? "border-primary bg-primary/10" : "border-border"}`}>{step > index + 1 ? <Check className="h-3.5 w-3.5" /> : index + 1}</span><span className="hidden sm:inline">{label}</span><span className="sm:hidden">{index === 0 ? "Describe" : index === 1 ? "Poster" : "Publish"}</span>{index < 2 && <span className="absolute right-0 top-1/2 hidden w-5 border-t sm:block" />}</button>)}</div>
     {step === 1 && <section className="max-w-3xl border bg-card p-5 sm:p-8"><p className="text-xs text-muted-foreground">THE STARTING POINT</p><h2 className="mt-2 font-display text-3xl">What's happening at {businessName}?</h2><label htmlFor="post-prompt" className="sr-only">Describe your post</label><Textarea id="post-prompt" className="mt-5 min-h-[150px] resize-y border-0 bg-secondary/60 px-4 py-4 text-base leading-7 shadow-none placeholder:text-muted-foreground focus-visible:ring-1" placeholder="Special announcement, offer, or new update from your business" value={prompt} onChange={(event) => setPrompt(event.target.value)} /><div className="mt-5 grid gap-5 border-t pt-5 sm:grid-cols-2"><ChoiceRow label="Style" choices={["Bold", "Minimal", "Festive", "Elegant"]} value={style} onChange={setStyle} /><ChoiceRow label="Format" choices={["Square", "Portrait 4:5", "Story"]} value={format} onChange={setFormat} /></div><div className="mt-5 flex items-center justify-between border-t pt-5"><div><p className="text-sm font-medium">Use my brand colors and logo</p><p className="mt-1 text-xs text-muted-foreground">Keep each post feeling like {businessName}.</p></div><Switch checked={useBrand} onCheckedChange={setUseBrand} aria-label="Use my brand colors and logo" /></div><div className="mt-6 flex items-center justify-between gap-3 border-t pt-5"><p className="text-xs text-muted-foreground">You can edit every detail next.</p><Button className="h-10 gap-2" onClick={startGeneration}>Generate poster <ArrowRight className="h-4 w-4" /></Button></div></section>}
-    {step === 2 && <PosterStep businessName={businessName} options={options} selected={selected} loading={loading} headline={headline} price={price} dateText={dateText} onSelect={(index) => { setSelected(index); setHeadline(options[index]?.headline ?? ""); setPrice(options[index]?.price ?? ""); }} onHeadline={setHeadline} onPrice={setPrice} onDate={setDateText} onRegenerate={regenerate} onBack={() => setStep(1)} onContinue={() => { if (!currentOption) return; setStep(3); }} />}
-    {step === 3 && <PublishStep businessName={businessName} instagramAccount={instagramAccount} option={currentOption} headline={headline} price={price} caption={caption} suggestions={suggestions} suggesting={suggesting} ownCaption={ownCaption} platforms={platforms} timing={timing} scheduledDate={scheduledDate} scheduledTime={scheduledTime} onCaption={setCaption} onSuggest={loadSuggestions} onChooseSuggestion={(text) => setCaption(text)} onPlatforms={setPlatforms} onTiming={setTiming} onDate={setScheduledDate} onTime={setScheduledTime} onBack={() => setStep(2)} onSubmit={() => setConfirmOpen(true)} />}
-    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle className="font-display text-2xl">{timing === "now" ? "Ready to share?" : "Save this to your calendar?"}</DialogTitle><DialogDescription>{timing === "now" ? `Your post will be marked as shared to ${platforms.join(" and ")}.` : `Your post will be scheduled for ${new Date(`${scheduledDate}T${scheduledTime}`).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}.`}</DialogDescription></DialogHeader><div className="my-2 flex gap-3 border-y py-4"><div className="w-[72px]"><Poster theme={currentOption?.theme ?? (brandKit.colors[0]?.toLowerCase() || "tomato")} eyebrow={brandKit.businessName ? brandKit.businessName.toUpperCase() : businessName.toUpperCase()} headline={headline} price={price} footer={currentOption?.footer ?? brandKit.tagline ?? "IDEAS INTO SCALABLE PRODUCTS"} /></div><div className="min-w-0 py-2"><p className="text-sm font-medium">{headline}</p><p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{caption || "No caption added"}</p><p className="mt-2 text-xs text-muted-foreground">{platforms.join(" · ")}</p></div></div><DialogFooter><Button variant="outline" onClick={() => setConfirmOpen(false)}>Keep editing</Button><Button disabled={publishing} onClick={submitPost}>{publishing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : timing === "now" ? "Post now" : "Schedule post"}</Button></DialogFooter></DialogContent></Dialog>
+    {step === 2 && <PosterStep businessName={businessName} logoUrl={brandKit.logoUrl} font={brandKit.font} options={options} selected={selected} loading={loading} headline={headline} price={price} dateText={dateText} onSelect={(index) => { setSelected(index); setHeadline(options[index]?.headline ?? ""); setPrice(options[index]?.price ?? ""); const d = options[index]?.brief?.date_text || options[index]?.date_text; if (d) setDateText(d); }} onHeadline={setHeadline} onPrice={setPrice} onDate={setDateText} onRegenerate={regenerate} onBack={() => setStep(1)} onContinue={() => { if (!currentOption) return; setStep(3); }} />}
+    {step === 3 && <PublishStep businessName={businessName} logoUrl={brandKit.logoUrl} font={brandKit.font} instagramAccount={instagramAccount} option={currentOption} headline={headline} price={price} caption={caption} suggestions={suggestions} suggesting={suggesting} ownCaption={ownCaption} platforms={platforms} timing={timing} scheduledDate={scheduledDate} scheduledTime={scheduledTime} onCaption={setCaption} onSuggest={loadSuggestions} onChooseSuggestion={(text) => setCaption(text)} onPlatforms={setPlatforms} onTiming={setTiming} onDate={setScheduledDate} onTime={setScheduledTime} onBack={() => setStep(2)} onSubmit={() => setConfirmOpen(true)} />}
+    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle className="font-display text-2xl">{timing === "now" ? "Ready to share?" : "Save this to your calendar?"}</DialogTitle><DialogDescription>{timing === "now" ? `Your post will be marked as shared to ${platforms.join(" and ")}.` : `Your post will be scheduled for ${new Date(`${scheduledDate}T${scheduledTime}`).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}.`}</DialogDescription></DialogHeader><div className="my-2 flex gap-3 border-y py-4"><div className="w-[72px]"><Poster theme={currentOption?.theme ?? (brandKit.colors[0]?.toLowerCase() || "tomato")} eyebrow={brandKit.businessName ? brandKit.businessName.toUpperCase() : businessName.toUpperCase()} headline={headline} price={price} dateText={dateText} footer={currentOption?.footer ?? brandKit.tagline ?? "IDEAS INTO SCALABLE PRODUCTS"} logoUrl={brandKit.logoUrl} font={brandKit.font} imageUrl={currentOption?.imageUrl} /></div><div className="min-w-0 py-2"><p className="text-sm font-medium">{headline}</p><p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{caption || "No caption added"}</p><p className="mt-2 text-xs text-muted-foreground">{platforms.join(" · ")}</p></div></div><DialogFooter><Button variant="outline" onClick={() => setConfirmOpen(false)}>Keep editing</Button><Button disabled={publishing} onClick={submitPost}>{publishing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : timing === "now" ? "Post now" : "Schedule post"}</Button></DialogFooter></DialogContent></Dialog>
   </>;
 }
 
@@ -1170,28 +1241,42 @@ function ChoiceRow({ label, choices, value, onChange }: { label: string; choices
   return <div><p className="mb-2 text-xs font-medium">{label}</p><div className="flex flex-wrap gap-1.5">{choices.map((choice) => <Button key={choice} variant={value === choice ? "secondary" : "outline"} size="sm" className={`h-8 px-2.5 text-xs ${value === choice ? "border-primary/30 text-primary" : "font-normal text-muted-foreground"}`} onClick={() => onChange(choice)} aria-pressed={value === choice}>{choice}</Button>)}</div></div>;
 }
 
-function PosterStep({ businessName, options, selected, loading, headline, price, dateText, onSelect, onHeadline, onPrice, onDate, onRegenerate, onBack, onContinue }: { businessName?: string; options: PosterOption[]; selected: number; loading: boolean; headline: string; price: string; dateText: string; onSelect: (index: number) => void; onHeadline: (value: string) => void; onPrice: (value: string) => void; onDate: (value: string) => void; onRegenerate: () => void; onBack: () => void; onContinue: () => void }) {
+function PosterStep({ businessName, logoUrl, font, options, selected, loading, headline, price, dateText, onSelect, onHeadline, onPrice, onDate, onRegenerate, onBack, onContinue }: { businessName?: string; logoUrl?: string | undefined; font?: string | undefined; options: PosterOption[]; selected: number; loading: boolean; headline: string; price: string; dateText: string; onSelect: (index: number) => void; onHeadline: (value: string) => void; onPrice: (value: string) => void; onDate: (value: string) => void; onRegenerate: () => void; onBack: () => void; onContinue: () => void }) {
   const [editText, setEditText] = useState(false);
   const [renderTick, setRenderTick] = useState(0);
   useMemo(() => { if (!loading) return undefined; const id = window.setInterval(() => setRenderTick((value) => value + 1), 850); return () => window.clearInterval(id); }, [loading]);
-  if (loading || !options.length) return <div className="grid gap-8 lg:grid-cols-[1fr_270px]"><div><p className="text-xs text-muted-foreground">A FEW DIRECTIONS TO TRY</p><h2 className="mt-2 font-display text-3xl">Finding the right feeling.</h2><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">{[0,1,2,3].map((index) => <div key={index} className="aspect-[4/5] animate-pulse border bg-secondary" />)}</div></div><div className="flex flex-col justify-center border-t pt-6 lg:border-l lg:border-t-0 lg:pl-7 lg:pt-0"><span className="text-[11px] font-semibold uppercase text-primary">{["Writing the design brief", "Rendering a few directions", "Adding your brand details"][renderTick % 3]}</span><div className="mt-4 h-1 overflow-hidden bg-secondary"><div className="h-full w-2/3 animate-pulse bg-primary" /></div><p className="mt-3 text-xs text-muted-foreground">Good things take a moment.</p></div></div>;
+  if (loading || !options.length) return <div className="grid gap-8 lg:grid-cols-[1fr_270px]"><div><p className="text-xs text-muted-foreground">A FEW DIRECTIONS TO TRY</p><h2 className="mt-2 font-display text-3xl">Finding the right feeling.</h2><div className="mt-6 grid grid-cols-2 gap-3 max-w-[540px]">{[0,1].map((index) => <div key={index} className="aspect-[4/5] animate-pulse border bg-secondary" />)}</div></div><div className="flex flex-col justify-center border-t pt-6 lg:border-l lg:border-t-0 lg:pl-7 lg:pt-0"><span className="text-[11px] font-semibold uppercase text-primary">{["Writing the design brief", "Rendering two directions", "Adding your brand details"][renderTick % 3]}</span><div className="mt-4 h-1 overflow-hidden bg-secondary"><div className="h-full w-2/3 animate-pulse bg-primary" /></div><p className="mt-3 text-xs text-muted-foreground">Good things take a moment.</p></div></div>;
   const option = options[selected];
   if (!option) return null;
-  const savePoster = () => {
-    const file = new Blob([`${headline}\n${price}\n${dateText}\nMade for ${businessName || "PostPilot"}`], { type: "text/plain" });
-    const url = URL.createObjectURL(file);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "postpilot-poster.txt";
-    anchor.click();
-    URL.revokeObjectURL(url);
-    toast.success("Poster details downloaded");
+  const savePoster = async () => {
+    try {
+      const dataUrl = await renderPosterCanvas({
+        theme: option.theme,
+        eyebrow: option.eyebrow,
+        headline,
+        price,
+        dateText,
+        footer: option.footer,
+        imageUrl: option.imageUrl,
+        logoUrl,
+        font,
+      });
+      const anchor = document.createElement("a");
+      anchor.href = dataUrl;
+      anchor.download = `${headline.slice(0, 20).replace(/\s+/g, "-").toLowerCase()}-poster.png`;
+      anchor.click();
+      toast.success("Poster image downloaded");
+    } catch {
+      toast.error("Failed to export poster image");
+    }
   };
-  return <div className="grid gap-8 lg:grid-cols-[1fr_310px]"><div><p className="text-xs text-muted-foreground">A FEW DIRECTIONS TO TRY</p><h2 className="mt-2 font-display text-3xl">Choose the one that feels right.</h2><div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{options.map((item, index) => <button key={item.id} onClick={() => onSelect(index)} className={`group border bg-card p-2.5 text-left transition-colors ${selected === index ? "border-primary" : "border-border hover:border-primary/50"}`} aria-pressed={selected === index} aria-label={`Select poster ${index + 1}`}><Poster theme={item.theme} eyebrow={item.eyebrow} headline={item.headline} price={item.price} footer={item.footer} selected={selected === index} /><span className="mt-2 block text-[11px] text-muted-foreground">Direction {index + 1}</span></button>)}</div><div className="mt-5 flex flex-wrap gap-2"><Button variant="outline" className="gap-2" onClick={onRegenerate}><Sparkles className="h-4 w-4" /> Try four more</Button><Button variant="ghost" className="gap-2" onClick={savePoster}><ArrowDownToLine className="h-4 w-4" /> Download</Button></div></div><div className="lg:sticky lg:top-24 lg:self-start"><p className="mb-3 text-xs font-medium">YOUR PICK</p><div className="mx-auto max-w-[270px]"><Poster theme={option.theme} eyebrow={option.eyebrow} headline={headline} price={price} footer={option.footer} /></div><div className="mt-4 flex items-center justify-between"><p className="text-xs text-muted-foreground">Make a quick edit</p><Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setEditText(!editText)}>{editText ? "Done" : "Edit text"}</Button></div>{editText && <div className="mt-3 space-y-2"><Input aria-label="Poster headline" value={headline} onChange={(event) => onHeadline(event.target.value)} placeholder="Headline" /><Input aria-label="Poster price" value={price} onChange={(event) => onPrice(event.target.value)} placeholder="Price" /><Input aria-label="Poster date or offer detail" value={dateText} onChange={(event) => onDate(event.target.value)} placeholder="Date or offer detail" /></div>}<div className="mt-4 flex gap-2"><Button variant="outline" className="flex-1" onClick={onBack}>Back</Button><Button className="flex-1 gap-2" onClick={onContinue}>Continue <ArrowRight className="h-4 w-4" /></Button></div></div></div>;
+  return <div className="grid gap-8 lg:grid-cols-[1fr_310px]"><div><p className="text-xs text-muted-foreground">A FEW DIRECTIONS TO TRY</p><h2 className="mt-2 font-display text-3xl">Choose the one that feels right.</h2><div className={`mt-5 grid gap-3 max-w-[540px] ${options.length <= 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4"}`}>{options.map((item, index) => <button key={item.id} onClick={() => onSelect(index)} className={`group border bg-card p-2.5 text-left transition-colors ${selected === index ? "border-primary" : "border-border hover:border-primary/50"}`} aria-pressed={selected === index} aria-label={`Select poster ${index + 1}`}><Poster theme={item.theme} eyebrow={item.eyebrow} headline={item.headline} price={item.price} dateText={item.date_text || item.brief?.date_text} footer={item.footer} selected={selected === index} logoUrl={logoUrl} font={font} imageUrl={item.imageUrl} needsReview={item.needs_review} /><span className="mt-2 block text-[11px] text-muted-foreground">Direction {index + 1}</span></button>)}</div><div className="mt-5 flex flex-wrap gap-2"><Button variant="outline" className="gap-2" onClick={onRegenerate}><Sparkles className="h-4 w-4" /> Try two more</Button><Button variant="ghost" className="gap-2" onClick={savePoster}><ArrowDownToLine className="h-4 w-4" /> Download</Button></div></div><div className="lg:sticky lg:top-24 lg:self-start"><p className="mb-3 text-xs font-medium">YOUR PICK</p><div className="mx-auto max-w-[270px]"><Poster theme={option.theme} eyebrow={option.eyebrow} headline={headline} price={price} dateText={dateText} footer={option.footer} logoUrl={logoUrl} font={font} imageUrl={option.imageUrl} needsReview={option.needs_review} /></div><div className="mt-4 flex items-center justify-between"><p className="text-xs text-muted-foreground">Make a quick edit</p><Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setEditText(!editText)}>{editText ? "Done" : "Edit text"}</Button></div>{editText && <div className="mt-3 space-y-2"><Input aria-label="Poster headline" value={headline} onChange={(event) => onHeadline(event.target.value)} placeholder="Headline" /><Input aria-label="Poster price" value={price} onChange={(event) => onPrice(event.target.value)} placeholder="Price" /><Input aria-label="Poster date or offer detail" value={dateText} onChange={(event) => onDate(event.target.value)} placeholder="Date or offer detail" /></div>}<div className="mt-4 flex gap-2"><Button variant="outline" className="flex-1" onClick={onBack}>Back</Button><Button className="flex-1 gap-2" onClick={onContinue}>Continue <ArrowRight className="h-4 w-4" /></Button></div></div></div>;
 }
 
 function PublishStep({
   businessName,
+  logoUrl,
+  font,
   instagramAccount,
   option,
   headline,
@@ -1215,6 +1300,8 @@ function PublishStep({
   onSubmit,
 }: {
   businessName: string;
+  logoUrl?: string | undefined;
+  font?: string | undefined;
   instagramAccount?: { platform: string; handle: string } | undefined;
   option?: PosterOption | undefined;
   headline: string;
@@ -1238,16 +1325,144 @@ function PublishStep({
   onSubmit: () => void;
 }) {
   const togglePlatform = (platform: Platform) => onPlatforms(platforms.includes(platform) ? platforms.filter((item) => item !== platform) : [...platforms, platform]);
-  const displayHandle = instagramAccount?.handle ? `@${instagramAccount.handle}` : businessName.toLowerCase().replace(/\s+/g, ".");
   const initial = (businessName || "P").charAt(0).toUpperCase();
+  const displayHandle = instagramAccount?.handle ? `@${instagramAccount.handle}` : businessName.toLowerCase().replace(/\s+/g, ".");
 
-  return <div className="grid gap-10 lg:grid-cols-[minmax(230px,0.8fr)_minmax(360px,1.2fr)]"><section className="lg:sticky lg:top-24 lg:self-start"><p className="mb-3 text-xs font-medium">A LITTLE PREVIEW</p><div className="mx-auto max-w-[300px] border bg-card p-3"><div className="mb-3 flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">{initial}</span><span className="text-xs font-semibold">{displayHandle}</span><MoreHorizontal className="ml-auto h-4 w-4" /></div><Poster theme={option?.theme ?? "tomato"} eyebrow={option?.eyebrow ?? businessName.toUpperCase()} headline={headline} price={price} footer={option?.footer ?? "IDEAS INTO SCALABLE PRODUCTS"} /><p className="mt-3 line-clamp-3 text-xs leading-5"><span className="font-semibold">{displayHandle} </span>{caption || "Your caption will show up here."}</p></div></section><section><p className="text-xs text-muted-foreground">ONE LAST THING</p><h2 className="mt-2 font-display text-3xl">Give it a voice.</h2><div className="mt-5 flex border-b" role="group" aria-label="Caption method"><Button variant="ghost" className={`rounded-none border-b-2 px-3 text-xs ${ownCaption ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`} onClick={() => onCaption(caption)}>Write my own</Button><Button variant="ghost" className={`rounded-none border-b-2 px-3 text-xs ${!ownCaption ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`} onClick={onSuggest}>Suggest captions</Button></div>{ownCaption ? <><label htmlFor="caption-text" className="sr-only">Write a caption</label><Textarea id="caption-text" className="mt-3 min-h-32 resize-y text-sm leading-6" maxLength={2200} placeholder="A good caption that shares what's new and engages your followers…" value={caption} onChange={(event) => onCaption(event.target.value)} /><div className="mt-1 text-right text-[11px] text-muted-foreground">{caption.length} / 2,200</div></> : <div className="mt-3 space-y-2">{suggesting ? <div className="flex items-center gap-2 border p-5 text-sm text-muted-foreground"><LoaderCircle className="h-4 w-4 animate-spin" /> Finding the right words…</div> : suggestions.map((item, index) => <button key={item} onClick={() => onChooseSuggestion(item)} className={`w-full border p-3 text-left text-xs leading-5 transition-colors ${caption === item ? "border-primary bg-primary/5" : "hover:border-primary/40"}`}><span className="mb-1 block text-[10px] font-semibold uppercase text-primary">Option {index + 1}</span>{item}</button>)}{!suggesting && suggestions.length > 0 && <Button variant="ghost" size="sm" className="mt-1 h-8 px-1 text-xs text-primary" onClick={onSuggest}>Regenerate suggestions</Button>}</div>}
-    <div className="mt-6 border-t pt-5"><div className="flex items-baseline justify-between"><h3 className="text-sm font-semibold">Where should it go?</h3><span className="text-xs text-muted-foreground">Choose one or more</span></div><div className="mt-3 grid grid-cols-3 gap-2">{(["Instagram", "Facebook", "X"] as Platform[]).map((platform) => {
-      const connected = platform === "Instagram" ? Boolean(instagramAccount) : false;
-      return <button key={platform} onClick={() => togglePlatform(platform)} className={`flex min-h-[70px] flex-col items-center justify-center gap-1.5 border transition-colors ${platforms.includes(platform) ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`} aria-pressed={platforms.includes(platform)}><span className="text-sm font-semibold">{platform === "Instagram" ? <Instagram className="h-[18px] w-[18px]" /> : platform === "Facebook" ? "f" : "𝕏"}</span><span className="text-[11px]">{platform}</span><span className={`text-[9px] ${connected ? "text-olive" : "text-muted-foreground"}`}>{connected ? "Connected" : "Optional"}</span></button>;
-    })}</div></div>
-    <div className="mt-6 border-t pt-5"><h3 className="text-sm font-semibold">When would you like it to go out?</h3><div className="mt-3 grid grid-cols-2 border"><Button variant="ghost" className={`h-10 rounded-none ${timing === "now" ? "bg-secondary font-semibold" : "font-normal text-muted-foreground"}`} onClick={() => onTiming("now")} aria-pressed={timing === "now"}>Post now</Button><Button variant="ghost" className={`h-10 rounded-none ${timing === "schedule" ? "bg-secondary font-semibold" : "font-normal text-muted-foreground"}`} onClick={() => onTiming("schedule")} aria-pressed={timing === "schedule"}>Schedule</Button></div>{timing === "schedule" && <div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="text-xs text-muted-foreground">Day<Input className="mt-1.5 text-foreground" type="date" value={scheduledDate} onChange={(event) => onDate(event.target.value)} /></label><label className="text-xs text-muted-foreground">Time<Input className="mt-1.5 text-foreground" type="time" value={scheduledTime} onChange={(event) => onTime(event.target.value)} /></label><p className="sm:col-span-2 text-xs text-muted-foreground">Times shown in your local timezone.</p></div>}</div>
-    <div className="mt-6 flex flex-wrap justify-between gap-2 border-t pt-5"><Button variant="outline" onClick={onBack}>Back to poster</Button><Button className="h-10 gap-2" onClick={onSubmit}>{timing === "now" ? "Post now" : "Schedule post"}<ArrowRight className="h-4 w-4" /></Button></div></section></div>;
+  return (
+    <div className="grid gap-10 lg:grid-cols-[minmax(230px,0.8fr)_minmax(360px,1.2fr)]">
+      <section className="lg:sticky lg:top-24 lg:self-start">
+        <p className="mb-3 text-xs font-medium">A LITTLE PREVIEW</p>
+        <div className="mx-auto max-w-[300px] border bg-card p-3">
+          <div className="mb-3 flex items-center gap-2">
+            {logoUrl ? (
+              <div className="h-7 w-7 rounded-full overflow-hidden border border-primary/20 bg-white p-0.5 shrink-0 flex items-center justify-center">
+                <img src={logoUrl} alt="Logo" className="h-full w-full object-contain" />
+              </div>
+            ) : (
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+                {initial}
+              </span>
+            )}
+            <span className="text-xs font-semibold">{displayHandle}</span>
+            <MoreHorizontal className="ml-auto h-4 w-4" />
+          </div>
+          <Poster
+            theme={option?.theme ?? "tomato"}
+            eyebrow={option?.eyebrow ?? businessName.toUpperCase()}
+            headline={headline}
+            price={price}
+            footer={option?.footer ?? "IDEAS INTO SCALABLE PRODUCTS"}
+            logoUrl={logoUrl}
+            font={font}
+            imageUrl={option?.imageUrl}
+          />
+          <p className="mt-3 line-clamp-3 text-xs leading-5">
+            <span className="font-semibold">{displayHandle} </span>
+            {caption || "Your caption will show up here."}
+          </p>
+        </div>
+      </section>
+      <section>
+        <p className="text-xs text-muted-foreground">ONE LAST THING</p>
+        <h2 className="mt-2 font-display text-3xl">Give it a voice.</h2>
+        <div className="mt-5 flex border-b" role="group" aria-label="Caption method">
+          <Button
+            variant="ghost"
+            className={`rounded-none border-b-2 px-3 text-xs ${ownCaption ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`}
+            onClick={() => onCaption(caption)}
+          >
+            Write my own
+          </Button>
+          <Button
+            variant="ghost"
+            className={`rounded-none border-b-2 px-3 text-xs ${!ownCaption ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`}
+            onClick={onSuggest}
+          >
+            Suggest captions
+          </Button>
+        </div>
+        {ownCaption ? (
+          <>
+            <label htmlFor="caption-text" className="sr-only">Write a caption</label>
+            <Textarea
+              id="caption-text"
+              className="mt-3 min-h-32 resize-y text-sm leading-6"
+              maxLength={2200}
+              placeholder="A good caption that shares what's new and engages your followers…"
+              value={caption}
+              onChange={(event) => onCaption(event.target.value)}
+            />
+            <div className="mt-1 text-right text-[11px] text-muted-foreground">{caption.length} / 2,200</div>
+          </>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {suggesting ? (
+              <div className="flex items-center gap-2 border p-5 text-sm text-muted-foreground">
+                <LoaderCircle className="h-4 w-4 animate-spin" /> Finding the right words…
+              </div>
+            ) : (
+              suggestions.map((item, index) => (
+                <button
+                  key={item}
+                  onClick={() => onChooseSuggestion(item)}
+                  className={`w-full border p-3 text-left text-xs leading-5 transition-colors ${caption === item ? "border-primary bg-primary/5" : "hover:border-primary/40"}`}
+                >
+                  <span className="mb-1 block text-[10px] font-semibold uppercase text-primary">Option {index + 1}</span>
+                  {item}
+                </button>
+              ))
+            )}
+            {!suggesting && suggestions.length > 0 && (
+              <Button variant="ghost" size="sm" className="mt-1 h-8 px-1 text-xs text-primary" onClick={onSuggest}>
+                Regenerate suggestions
+              </Button>
+            )}
+          </div>
+        )}
+        <div className="mt-6 border-t pt-5">
+          <div className="flex items-baseline justify-between">
+            <h3 className="text-sm font-semibold">Where should it go?</h3>
+            <span className="text-xs text-muted-foreground">Choose one or more</span>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {(["Instagram", "Facebook", "X"] as Platform[]).map((platform) => {
+              const connected = platform === "Instagram" ? Boolean(instagramAccount) : false;
+              return (
+                <button
+                  key={platform}
+                  onClick={() => togglePlatform(platform)}
+                  className={`flex min-h-[70px] flex-col items-center justify-center gap-1.5 border transition-colors ${platforms.includes(platform) ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}
+                  aria-pressed={platforms.includes(platform)}
+                >
+                  <span className="text-sm font-semibold">{platform === "Instagram" ? <Instagram className="h-[18px] w-[18px]" /> : platform === "Facebook" ? "f" : "𝕏"}</span>
+                  <span className="text-[11px]">{platform}</span>
+                  <span className={`text-[9px] ${connected ? "text-olive" : "text-muted-foreground"}`}>{connected ? "Connected" : "Optional"}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="mt-6 border-t pt-5">
+          <h3 className="text-sm font-semibold">When would you like it to go out?</h3>
+          <div className="mt-3 grid grid-cols-2 border">
+            <Button variant="ghost" className={`h-10 rounded-none ${timing === "now" ? "bg-secondary font-semibold" : "font-normal text-muted-foreground"}`} onClick={() => onTiming("now")} aria-pressed={timing === "now"}>Post now</Button>
+            <Button variant="ghost" className={`h-10 rounded-none ${timing === "schedule" ? "bg-secondary font-semibold" : "font-normal text-muted-foreground"}`} onClick={() => onTiming("schedule")} aria-pressed={timing === "schedule"}>Schedule</Button>
+          </div>
+          {timing === "schedule" && (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="text-xs text-muted-foreground">Day<Input className="mt-1.5 text-foreground" type="date" value={scheduledDate} onChange={(event) => onDate(event.target.value)} /></label>
+              <label className="text-xs text-muted-foreground">Time<Input className="mt-1.5 text-foreground" type="time" value={scheduledTime} onChange={(event) => onTime(event.target.value)} /></label>
+              <p className="sm:col-span-2 text-xs text-muted-foreground">Times shown in your local timezone.</p>
+            </div>
+          )}
+        </div>
+        <div className="mt-6 flex flex-wrap justify-between gap-2 border-t pt-5">
+          <Button variant="outline" onClick={onBack}>Back to poster</Button>
+          <Button className="h-10 gap-2" onClick={onSubmit}>{timing === "now" ? "Post now" : "Schedule post"}<ArrowRight className="h-4 w-4" /></Button>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function ScheduledPage({
@@ -1680,6 +1895,8 @@ function BrandKit({
   const [colors, setColors] = useState<string[]>(data.colors && data.colors.length > 0 ? data.colors : ["Tomato", "Olive"]);
   const [font, setFont] = useState(data.font || "Fraunces");
   const [logoName, setLogoName] = useState(data.logoName || "");
+  const [logoUrl, setLogoUrl] = useState(data.logoUrl || "");
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   const toggleColor = (color: string) =>
     setColors(
@@ -1703,8 +1920,45 @@ function BrandKit({
       colors: colors.length > 0 ? colors : ["Tomato", "Olive"],
       font,
       logoName,
+      logoUrl,
     };
     onSave(updated);
+  };
+
+  const handleLogoFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploadingLogo(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const dataUrl = reader.result as string;
+        // Instantly display local preview so user sees it right away
+        setLogoUrl(dataUrl);
+        setLogoName(file.name);
+
+        const res = await uploadBrandLogo({
+          data: {
+            dataUrl,
+            filename: file.name,
+          },
+        });
+
+        if (res && res.success && res.publicUrl) {
+          setLogoUrl(res.publicUrl);
+          setLogoName(file.name);
+          toast.success("Logo uploaded to Supabase Storage!");
+        } else {
+          toast.error("Logo upload failed. Using local preview.");
+        }
+      } catch (err: any) {
+        toast.error(err?.message || "Logo upload failed");
+      } finally {
+        setUploadingLogo(false);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const previewTheme = (colors[0] ? colors[0].toLowerCase() : "tomato");
@@ -1721,8 +1975,8 @@ function BrandKit({
           </Button>
         }
       />
-      <div className="grid gap-10 lg:grid-cols-[1fr_300px]">
-        <div className="space-y-7">
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px] items-start w-full">
+        <div className="space-y-7 min-w-0 w-full">
           <section className="border-b pb-6">
             <h2 className="font-display text-2xl">The essentials</h2>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -1755,54 +2009,172 @@ function BrandKit({
             </div>
           </section>
           <section className="pb-3">
-            <h2 className="font-display text-2xl">Heading style</h2>
-            <p className="mt-1 text-xs text-muted-foreground">Used for the big words on your posters.</p>
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {["Fraunces", "DM Serif", "Work Sans"].map((item) => (
-                <Button
-                  key={item}
-                  variant={font === item ? "secondary" : "outline"}
-                  className={`h-10 ${font === item ? "border-primary/30 text-primary font-semibold" : "font-normal"}`}
-                  onClick={() => setFont(item)}
-                  aria-pressed={font === item}
+            <div className="flex items-baseline justify-between">
+              <h2 className="font-display text-2xl">Heading style</h2>
+              <span className="text-xs text-muted-foreground">Used for the big words on your posters</span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">Select a typeface below to see your posters update in real-time.</p>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {[
+                { name: "Fraunces", style: "Soft Editorial Serif", family: "'Fraunces', Georgia, serif" },
+                { name: "DM Serif", style: "Dramatic Display Serif", family: "'DM Serif Display', Georgia, serif" },
+                { name: "Work Sans", style: "Bold Modern Sans-Serif", family: "'Work Sans', sans-serif" },
+              ].map((item) => (
+                <button
+                  key={item.name}
+                  type="button"
+                  onClick={() => {
+                    setFont(item.name);
+                    toast.info(`Heading style set to ${item.name}`);
+                  }}
+                  className={`flex flex-col items-start rounded-lg border p-3.5 text-left transition-all ${
+                    font === item.name
+                      ? "border-primary bg-primary/5 ring-1 ring-primary shadow-xs"
+                      : "border-border bg-card hover:border-primary/50"
+                  }`}
+                  aria-pressed={font === item.name}
                 >
-                  {item}
-                </Button>
+                  <div className="flex w-full items-center justify-between">
+                    <span
+                      className="text-lg leading-tight"
+                      style={{
+                        fontFamily: item.family,
+                        fontWeight: item.name === "Work Sans" ? 700 : 600,
+                      }}
+                    >
+                      {item.name}
+                    </span>
+                    {font === item.name && (
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white text-[10px]">
+                        <Check className="h-3 w-3" />
+                      </span>
+                    )}
+                  </div>
+                  <span className="mt-1 text-[11px] text-muted-foreground">
+                    {item.style}
+                  </span>
+                  <div
+                    className="mt-2 text-xs truncate max-w-full text-foreground/80 border-t pt-1.5 w-full"
+                    style={{
+                      fontFamily: item.family,
+                      fontWeight: item.name === "Work Sans" ? 700 : 500,
+                    }}
+                  >
+                    Turning ideas into reality
+                  </div>
+                </button>
               ))}
             </div>
           </section>
           <section>
             <h2 className="font-display text-2xl">Logo</h2>
             <p className="mt-1 text-xs text-muted-foreground">Add your mark to the corner of a poster.</p>
-            <label className="mt-4 flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 border border-dashed text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground">
-              <Upload className="h-5 w-5" />
-              {logoName ? (
-                <span className="font-medium text-foreground">Attached: {logoName} (Click to change)</span>
-              ) : (
-                "Choose a logo file"
-              )}
-              <input
-                className="sr-only"
-                type="file"
-                accept="image/*"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) {
-                    setLogoName(file.name);
-                    toast.success(`${file.name} selected as brand mark`);
-                  }
-                }}
-              />
-            </label>
+            
+            {logoUrl ? (
+              <div className="mt-4 rounded-lg border bg-card p-4 space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border bg-white p-1.5 shadow-xs">
+                      <img src={logoUrl} alt="Logo preview" className="h-full w-full object-contain" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{logoName || "Brand Mark"}</p>
+                      <span className="inline-flex items-center gap-1 mt-0.5 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-medium text-emerald-800">
+                        <Check className="h-3 w-3 text-emerald-600" /> Stored in Supabase Bucket
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <label className="cursor-pointer">
+                      <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" asChild>
+                        <span>
+                          <Upload className="h-3.5 w-3.5" />
+                          {uploadingLogo ? "Uploading..." : "Replace"}
+                        </span>
+                      </Button>
+                      <input
+                        className="sr-only"
+                        type="file"
+                        accept="image/*"
+                        disabled={uploadingLogo}
+                        onChange={handleLogoFile}
+                      />
+                    </label>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs text-destructive hover:bg-destructive/10"
+                      onClick={() => {
+                        setLogoUrl("");
+                        setLogoName("");
+                        toast.info("Logo removed");
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5 mr-1" /> Remove
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Show direct Supabase CDN link as requested */}
+                <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 min-w-0 max-w-full overflow-hidden">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider shrink-0">Supabase Link</span>
+                  <div className="min-w-0 flex-1 overflow-hidden">
+                    <p className="text-[11px] font-mono text-foreground/80 truncate select-all" title={logoUrl}>
+                      {logoUrl}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-[11px] gap-1 shrink-0 hover:bg-muted"
+                    onClick={() => {
+                      navigator.clipboard.writeText(logoUrl);
+                      toast.success("Supabase link copied to clipboard");
+                    }}
+                  >
+                    <Copy className="h-3 w-3" /> Copy
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <label className="mt-4 flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 border border-dashed rounded-lg text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground bg-muted/10">
+                {uploadingLogo ? (
+                  <div className="flex items-center gap-2 py-2">
+                    <LoaderCircle className="h-5 w-5 animate-spin text-primary" />
+                    <span>Uploading to Supabase Storage...</span>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="h-5 w-5 text-muted-foreground" />
+                    <span className="font-medium text-foreground">Click to upload your logo</span>
+                    <span className="text-[11px] text-muted-foreground">PNG, JPG, SVG or WEBP (Uploaded directly to Supabase CDN)</span>
+                  </>
+                )}
+                <input
+                  className="sr-only"
+                  type="file"
+                  accept="image/*"
+                  disabled={uploadingLogo}
+                  onChange={handleLogoFile}
+                />
+              </label>
+            )}
           </section>
         </div>
-        <aside className="lg:sticky lg:top-24 lg:self-start">
+        <aside className="w-full lg:w-[280px] shrink-0 lg:sticky lg:top-24 lg:self-start">
           <p className="mb-3 text-xs font-medium">A LITTLE PREVIEW</p>
-          <div className="border bg-card p-3">
+          <div className="border bg-card p-3 rounded-lg shadow-xs w-full max-w-[280px]">
             <div className="mb-3 flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
-                {(name || "B").charAt(0).toUpperCase()}
-              </span>
+              {logoUrl ? (
+                <div className="h-7 w-7 rounded-full overflow-hidden border border-primary/20 bg-white p-0.5 shrink-0 flex items-center justify-center">
+                  <img src={logoUrl} alt="Logo" className="h-full w-full object-contain" />
+                </div>
+              ) : (
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary shrink-0">
+                  {(name || "B").charAt(0).toUpperCase()}
+                </span>
+              )}
               <div className="min-w-0">
                 <p className="text-xs font-semibold truncate">{name || "Your business"}</p>
                 {logoName && <p className="text-[10px] text-muted-foreground truncate">{logoName}</p>}
@@ -1814,8 +2186,10 @@ function BrandKit({
               headline="Turning ideas into reality"
               price="Available now"
               footer={tagline || "YOUR TAGLINE"}
+              logoUrl={logoUrl}
+              font={font}
             />
-            <p className="mt-3 text-[11px] text-muted-foreground">Typeface · {font}</p>
+            <p className="mt-3 text-[11px] text-muted-foreground">Typeface · <strong className="font-semibold text-foreground">{font}</strong></p>
           </div>
         </aside>
       </div>
@@ -1860,11 +2234,7 @@ function Accounts({
 
   const handleConnectClick = (platform: Platform) => {
     setSelectedPlatform(platform);
-    if (platform === "Instagram" && isMeetSoni) {
-      setHandleInput("avero.innovations");
-    } else {
-      setHandleInput(userEmail ? userEmail.split("@")[0] || "" : "");
-    }
+    setHandleInput("");
     setConnectModalOpen(true);
   };
 
@@ -1979,7 +2349,7 @@ function Accounts({
       </div>
       <p className="mt-5 max-w-3xl border-l-2 border-primary/50 py-1 pl-4 text-xs leading-5 text-muted-foreground">
         {isInstagramActive
-          ? `Instagram Business/Creator account connected and active via Zernio${isMeetSoni ? " (@avero.innovations)" : ""}.`
+          ? `Instagram Business/Creator account connected and active via Meta Graph API.`
           : "Connect your Instagram Professional (Business or Creator) account to enable direct publishing from PostPilot."}
       </p>
 
@@ -2009,10 +2379,13 @@ function Accounts({
 
             {/* Automated OAuth Button */}
             <div>
-              <p className="mb-2 text-xs font-medium">Option 1: Automated OAuth Flow (Recommended)</p>
+              <p className="mb-2 text-xs font-semibold text-foreground">Option 1: Automated OAuth Flow (Recommended)</p>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Opens the secure Instagram login screen where you enter your Instagram username and password. You will only connect your own verified account.
+              </p>
               <Button
                 type="button"
-                className="h-11 w-full gap-2 text-sm font-medium"
+                className="h-12 w-full gap-2 text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
                 disabled={loading}
                 onClick={handleStartOAuth}
               >
@@ -2023,53 +2396,6 @@ function Accounts({
                     <Sparkles className="h-4 w-4" /> Connect with {selectedPlatform} via OAuth <ExternalLink className="h-3.5 w-3.5 ml-auto opacity-70" />
                   </>
                 )}
-              </Button>
-            </div>
-
-            {/* Manual Link Option for verified account */}
-            <div className="relative my-2 flex items-center justify-center">
-              <span className="h-[1px] w-full bg-border" />
-              <span className="absolute bg-card px-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                Option 2: Link Verified Channel
-              </span>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-medium">
-                Verified channel username
-                <div className="relative mt-1.5 flex items-center">
-                  <span className="absolute left-3 text-xs text-muted-foreground">@</span>
-                  <Input
-                    className="pl-7 text-xs"
-                    placeholder="avero.innovations"
-                    value={handleInput}
-                    onChange={(e) => setHandleInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleConfirmConnect();
-                    }}
-                  />
-                </div>
-              </label>
-
-              {selectedPlatform === "Instagram" && (isMeetSoni || handleInput.toLowerCase() === "avero.innovations") ? (
-                <p className="text-[11px] text-olive font-medium">
-                  Verified channel: Linked to active Zernio API credentials (@avero.innovations).
-                </p>
-              ) : (
-                <p className="text-[11px] text-muted-foreground">
-                  Notice: Only verified accounts with active Meta tokens can be linked directly.
-                </p>
-              )}
-
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full text-xs"
-                disabled={loading}
-                onClick={handleConfirmConnect}
-              >
-                Link Handle (@{handleInput.replace(/^@/, "") || "avero.innovations"})
               </Button>
             </div>
           </div>
@@ -2151,62 +2477,7 @@ function SignInScreen() {
     }
   };
 
-  return (
-    <div className="grid min-h-screen bg-background lg:grid-cols-[1.02fr_0.98fr]">
-      <section className="relative flex min-h-[42vh] flex-col justify-between overflow-hidden bg-primary p-7 text-primary-foreground sm:p-12 lg:min-h-screen lg:p-16">
-        <div className="flex w-fit items-center gap-2.5 text-left">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary-foreground/30">
-            <Send className="h-4 w-4" />
-          </span>
-          <span className="font-display text-[21px]">postpilot</span>
-        </div>
-        <div className="my-12 max-w-xl">
-          <p className="mb-4 text-[11px] font-semibold uppercase tracking-wider">FOR THE GOOD THINGS YOU MAKE</p>
-          <h1 className="font-display text-5xl leading-[1.02] sm:text-6xl">Your next good post starts here.</h1>
-          <p className="mt-5 max-w-md text-sm leading-7 text-primary-foreground/80">
-            The neighborhood places people love deserve to be seen. Make room for the work that makes them special.
-          </p>
-        </div>
-        <div className="flex items-center gap-3 border-t border-primary-foreground/25 pt-5 text-xs">
-          <span className="flex -space-x-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full border border-primary bg-secondary text-[9px] text-secondary-foreground font-semibold">L</span>
-            <span className="flex h-7 w-7 items-center justify-center rounded-full border border-primary bg-secondary text-[9px] text-secondary-foreground font-semibold">M</span>
-            <span className="flex h-7 w-7 items-center justify-center rounded-full border border-primary bg-secondary text-[9px] text-secondary-foreground font-semibold">S</span>
-          </span>
-          <span>For the people behind the places you love.</span>
-        </div>
-      </section>
-
-      <section className="flex items-center justify-center px-6 py-14 sm:px-12">
-        <div className="w-full max-w-sm text-center sm:text-left">
-          <p className="text-xs font-semibold uppercase tracking-wider text-primary">WELCOME BACK</p>
-          <h2 className="mt-3 font-display text-4xl">Good to see you.</h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">Sign in with your Google account to get started.</p>
-
-          <div className="mt-8 space-y-4">
-            <Button
-              type="button"
-              variant="outline"
-              className="h-12 w-full gap-3 border-input bg-card text-base font-medium shadow-sm hover:bg-secondary/70 text-foreground transition-all duration-150 hover:shadow"
-              disabled={googleLoading}
-              onClick={handleGoogleSignIn}
-            >
-              {googleLoading ? (
-                <LoaderCircle className="h-5 w-5 animate-spin text-muted-foreground" />
-              ) : (
-                <GoogleIcon className="h-5 w-5 shrink-0" />
-              )}
-              <span>Continue with Google</span>
-            </Button>
-
-            <p className="text-center text-xs text-muted-foreground">
-              Fast, secure 1-click sign in. No passwords required.
-            </p>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
+  return <LandingPage onSignIn={handleGoogleSignIn} googleLoading={googleLoading} />;
 }
 
 function EmptyState({ title, message, action, onAction }: { title: string; message: string; action?: string; onAction?: () => void }) {

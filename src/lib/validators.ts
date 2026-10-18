@@ -96,6 +96,7 @@ export const generatePostersSchema = z.object({
   style: z.enum(["Bold", "Minimal", "Festive", "Elegant"]).default("Bold"),
   format: z.enum(["Square", "Portrait 4:5", "Story"]).default("Portrait 4:5"),
   use_brand: z.boolean().default(true),
+  count: z.number().int().min(1).max(4).default(2).optional(),
 });
 
 // ─── Captions ─────────────────────────────────────────────────────────────────

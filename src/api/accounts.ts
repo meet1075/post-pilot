@@ -23,6 +23,7 @@ import {
   NotFoundError,
 } from "../lib/errors.js";
 import { apiSuccess, formatZodIssues } from "../lib/apiResponse.js";
+import Zernio from "@zernio/node";
 
 interface ConnectedAccountRow {
   id: string;
@@ -88,17 +89,52 @@ export const getZernioConnectUrl = createServerFn({ method: "GET" })
       const platform = data?.platform || "Instagram";
       const normalizedPlatform = platform.toLowerCase();
       const zernioKey = process.env["ZERNIO_API_KEY"];
+      if (!zernioKey) throw new ValidationError("ZERNIO_API_KEY is not configured");
+
       const appUrl = process.env["PUBLIC_APP_URL"] ?? "http://localhost:8080";
-
-      // Zernio connect flow — generate a unique state token to prevent CSRF
-      const state = Buffer.from(
-        JSON.stringify({ businessId: session.businessId, platform, ts: Date.now() })
-      ).toString("base64url");
-
       const redirectUri = `${appUrl}/auth/zernio-callback`;
-      const connectUrl = `https://app.zernio.com/connect?platform=${normalizedPlatform}&state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}`;
 
-      return apiSuccess({ url: connectUrl }, "Connect URL generated successfully");
+      const zernio = new Zernio({ apiKey: zernioKey });
+
+      // Create or reuse an isolated profile per business so users don't share Avero's profile
+      let profileId = "6ad323c1906cf34fba1f8939";
+      try {
+        const profilesRes = await zernio.profiles.listProfiles();
+        const profileName = `Workspace-${session.businessId.slice(0, 8)}`;
+        const existing = profilesRes?.data?.profiles?.find(
+          (p: any) => p.name === profileName || p.name === session.businessId
+        );
+        if (existing?._id) {
+          profileId = existing._id;
+        } else {
+          const created = await zernio.profiles.createProfile({
+            body: { name: profileName },
+          });
+          if (created?.data?.profile?._id) {
+            profileId = created.data.profile._id;
+          }
+        }
+      } catch (profileErr) {
+        console.warn("Could not manage isolated profile, using fallback:", profileErr);
+      }
+
+      // forceReauth=true tells Instagram to show its login page (ID & Password)
+      // so users connect their OWN Instagram account instead of auto-reusing any cached session.
+      const connectRes = await zernio.connect.getConnectUrl({
+        path: { platform: normalizedPlatform as any },
+        query: {
+          profileId,
+          redirect_url: redirectUri,
+          forceReauth: true,
+        },
+      });
+
+      const authUrl = connectRes?.data?.authUrl;
+      if (!authUrl) {
+        throw new Error("Could not obtain OAuth authorization URL from Zernio");
+      }
+
+      return apiSuccess({ url: authUrl }, "Connect URL generated successfully");
     } catch (err) {
       return errorToResponse(err);
     }

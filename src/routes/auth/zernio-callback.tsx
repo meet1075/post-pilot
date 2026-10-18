@@ -19,9 +19,12 @@ function ZernioCallbackPage() {
     if (typeof window === "undefined") return;
 
     const params = new URLSearchParams(window.location.search);
-    const platform = params.get("platform") || "Instagram";
-    const accountId = params.get("account_id") || params.get("accountId");
-    const handle = params.get("handle") || params.get("username") || "connected";
+    const connectedParam = params.get("connected") || params.get("platform");
+    const platform = connectedParam
+      ? connectedParam.charAt(0).toUpperCase() + connectedParam.slice(1).toLowerCase()
+      : "Instagram";
+    const accountId = params.get("accountId") || params.get("account_id");
+    const handle = params.get("username") || params.get("handle") || "connected";
     const error = params.get("error") || params.get("error_description");
 
     if (error) {

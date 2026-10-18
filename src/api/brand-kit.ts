@@ -19,7 +19,7 @@ import {
   ValidationError,
   NotFoundError,
 } from "../lib/errors.js";
-import { getUploadPresignedUrl, getPublicUrl, buildLogoKey } from "../lib/storage.js";
+import { getUploadPresignedUrl, getPublicUrl, buildLogoKey, uploadPosterImage } from "../lib/storage.js";
 
 interface BrandKitRow {
   id: string;
@@ -150,27 +150,50 @@ export const getLogoUploadUrl = createServerFn({ method: "POST" })
     }
   });
 
-// ─── confirmLogoUpload ────────────────────────────────────────────────────────
+// ─── uploadBrandLogo ──────────────────────────────────────────────────────────
 
-export const confirmLogoUpload = createServerFn({ method: "POST" })
-  .validator((d: { key: string; publicUrl: string }) => d)
+export const uploadBrandLogo = createServerFn({ method: "POST" })
+  .validator((d: { dataUrl: string; filename?: string }) => d)
   .handler(async ({ data }) => {
     try {
-      const session = await requireAuth();
-      if (!session.businessId) throw new ForbiddenError("No active business");
+      let businessId = "general";
+      try {
+        const session = await requireAuth();
+        if (session.businessId) businessId = session.businessId;
+      } catch {
+        // Fallback for workspace without active auth session
+      }
 
-      const { key, publicUrl } = data;
-      if (!key || !publicUrl) throw new ValidationError("key and publicUrl are required");
+      const match = data.dataUrl.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+      const contentType: string = (match && match[1]) ? match[1] : "image/png";
+      const base64Content: string = (match && match[2]) ? match[2] : data.dataUrl.replace(/^data:image\/\w+;base64,/, "");
+      const buffer = Buffer.from(base64Content, "base64");
 
-      await query`
-        UPDATE brand_kits
-        SET logo_r2_key = ${key}, logo_public_url = ${publicUrl}
-        WHERE business_id = ${session.businessId}
-      `;
+      const sanitizedName = (data.filename || "logo").replace(/[^a-zA-Z0-9._-]/g, "_");
+      const key = `logos/${businessId}/${Date.now()}-${sanitizedName}`;
 
-      return { success: true, logo_public_url: publicUrl };
+      const { publicUrl } = await uploadPosterImage({
+        key,
+        body: buffer,
+        contentType,
+      });
+
+      if (businessId !== "general") {
+        try {
+          await query`
+            UPDATE brand_kits
+            SET logo_r2_key = ${key}, logo_public_url = ${publicUrl}
+            WHERE business_id = ${businessId}
+          `;
+        } catch (dbErr) {
+          console.warn("[uploadBrandLogo] DB update warning:", dbErr);
+        }
+      }
+
+      return { success: true, publicUrl, key };
     } catch (err) {
       const { error, status } = errorToResponse(err);
       return { success: false, error, status };
     }
   });
+

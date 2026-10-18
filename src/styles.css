@@ -61,6 +61,8 @@
   --color-sidebar-ring: var(--sidebar-ring);
   --font-sans: "DM Sans", sans-serif;
   --font-display: "Fraunces", Georgia, serif;
+  --font-serif: "DM Serif Display", Georgia, serif;
+  --font-work: "Work Sans", -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 :root {
@@ -149,6 +151,15 @@
 
 .font-display {
   font-family: var(--font-display);
+}
+.font-fraunces {
+  font-family: var(--font-display);
+}
+.font-dm-serif {
+  font-family: var(--font-serif);
+}
+.font-work-sans {
+  font-family: var(--font-work);
 }
 
 .poster {

@@ -1,15 +1,16 @@
 /**
- * PostPilot — Poster Generation API (TanStack Server Function)
+ * PostPilot — Single-Shot Finished Flyer Poster Generation Pipeline
  *
- * Generates poster options using the Ideogram API.
- * The AI generates background/artwork; the actual offer text (headline,
- * price, date) is always overlaid in code to guarantee accuracy.
+ * Generates agency-quality, ready-to-post Instagram flyers (1024x1280 4:5 portrait)
+ * where the brand header, bold headline, price banner, feature points, CTA button,
+ * and relevant 3D mockups/scenes are rendered directly inside ONE generated image.
  *
- * Rate limited to 10 requests/min per user (AI endpoint tier).
- *
- * Config:
- *  IDEOGRAM_API_KEY   - Ideogram API key
- *  IDEOGRAM_MODEL     - e.g. "V_2_TURBO" (default)
+ * Includes:
+ *  1. Flyer Brief Generation (gpt-4o-mini JSON mode)
+ *  2. Single-Shot Flyer Generation (OpenAI gpt-image-2.5-flare with logo image edits)
+ *  3. Automatic Vision Text Verification & One-Time Repair (gpt-4o-mini vision)
+ *  4. Targeted Text Editing (OpenAI images/edits)
+ *  5. Graceful typographic fallback if offline / API key absent
  */
 
 import { createServerFn } from "@tanstack/react-start";
@@ -29,44 +30,574 @@ import { apiSuccess, formatZodIssues } from "../lib/apiResponse.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface FlyerBrief {
+  headline: string;
+  price_text: string;
+  date_text?: string | undefined;
+  features: string[];
+  cta: string;
+  scene: string;
+  layout: "left-text-right-visual" | "centered-hero" | "bottom-banner";
+  style_notes: string;
+}
+
 export interface PosterOption {
   id: string;
   theme: string;
   eyebrow: string;
   headline: string;
   price: string;
+  date_text?: string | undefined;
   footer: string;
-  /** Public URL of the generated background image (if Ideogram was called) */
   imageUrl?: string | undefined;
+  brief?: FlyerBrief | undefined;
+  text_check_passed?: boolean | undefined;
+  needs_review?: boolean | undefined;
+  repair_calls?: number | undefined;
+  model_used?: string | undefined;
+  size?: string | undefined;
+  quality?: string | undefined;
 }
 
 interface BrandKitRow {
   colors: string[];
   font: string;
   caption_tone: string;
+  logo_public_url?: string | null;
 }
 
-interface BusinessRow {
-  name: string;
-  tagline: string;
-  location: string;
+// ─── Step 1: Flyer Brief Generation (gpt-4o-mini) ─────────────────────────────
+
+export async function generateFlyerBrief(opts: {
+  prompt: string;
+  style?: string | undefined;
+  businessName?: string | undefined;
+  tagline?: string | undefined;
+  colors?: string[] | undefined;
+  tone?: string | undefined;
+  location?: string | undefined;
+  phone?: string | undefined;
+  layout?: "left-text-right-visual" | "centered-hero" | "bottom-banner" | undefined;
+}): Promise<FlyerBrief> {
+  const apiKey = process.env["OPENAI_API_KEY"]?.trim();
+  const model = process.env["OPENAI_MODEL"]?.trim() || "gpt-4o-mini";
+
+  const brandName = opts.businessName || "Avero Innovations";
+  const brandTagline = opts.tagline || "";
+  const brandColors = opts.colors?.join(", ") || "teal, navy blue, clean white";
+  const brandTone = opts.tone || "Premium";
+
+  const systemPrompt = `You are an elite commercial advertisement copywriter creating a precise flyer brief for an Instagram marketing ad.
+Input is the user's prompt, the business brand kit (name, tagline, colors, tone, logo URL, location/phone if saved) and the style chosen.
+
+Return exactly one JSON brief:
+{
+  "headline": "4-6 words, faithful to the user's offer",
+  "price_text": "exact price/offer string with currency, e.g. JUST ₹9,999 or 20% OFF",
+  "date_text": "exact date, day of week, or duration if mentioned in the prompt (e.g. 'THIS SATURDAY ONLY', 'EVERY SATURDAY', 'VALID TILL 25TH OCT', 'THIS WEEKEND'). If NO date or day is mentioned in the prompt, set to empty string \"\"",
+  "features": ["3 short labels, max 3 words each"],
+  "cta": "short action text, max 5 words",
+  "scene": "what the visual should show (e.g. 3D laptop and phone showing a modern website)",
+  "layout": "one of: left-text-right-visual | centered-hero | bottom-banner",
+  "style_notes": "colors and mood from the brand kit"
 }
 
-// ─── Theme definitions ────────────────────────────────────────────────────────
+Rules:
+- IMPORTANT FOR DATES & DAYS: If the user prompt mentions any day of week (e.g. Saturday, Sunday, weekend), specific date (e.g. 25th October, Oct 25), or deadline/duration (e.g. 'on Saturday', 'this Friday', 'valid till tomorrow'), you MUST extract it and put it in "date_text" as clean uppercase text (e.g. "THIS SATURDAY ONLY", "EVERY SATURDAY", "VALID TILL 25TH OCT", "THIS WEEKEND"). If no date or day is mentioned, set "date_text" to "".
+- NEVER invent prices, discounts, dates, claims or contact details. Use only what the user and the brand kit provide.
+- If no price is mentioned in the prompt, set "price_text" to "EXCLUSIVE OFFER".
+- If no CTA is mentioned, write a short high-converting CTA matching the topic (e.g. "LET'S BUILD YOUR WEBSITE →").
+- Set "layout" to "${opts.layout || "left-text-right-visual"}".`;
 
-const POSTER_THEMES: Array<{
-  theme: string;
-  eyebrow: string;
-  footer: string;
-  colorHex: string;
-}> = [
-  { theme: "tomato", eyebrow: "EVERY DAY", footer: "GOOD FOOD, GOOD COMPANY", colorHex: "#B91C1C" },
-  { theme: "olive", eyebrow: "A LITTLE SOMETHING", footer: "MADE FRESH DAILY", colorHex: "#4D7C0F" },
-  { theme: "cream", eyebrow: "THE NEIGHBOURHOOD TABLE", footer: "COME HUNGRY · LEAVE HAPPY", colorHex: "#D97706" },
-  { theme: "mustard", eyebrow: "A REASON TO GATHER", footer: "YOUR TABLE IS WAITING", colorHex: "#92400E" },
-];
+  const userPrompt = `User Offer Prompt: "${opts.prompt}"
+Business Name: "${brandName}"
+Tagline: "${brandTagline}"
+Brand Colors: "${brandColors}"
+Tone: "${brandTone}"
+Style: "${opts.style || "Bold"}"`;
 
-// ─── generatePosters ──────────────────────────────────────────────────────────
+  if (apiKey) {
+    try {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.6,
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (res.ok) {
+        const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+        const content = json.choices?.[0]?.message?.content;
+        if (content) {
+          const parsed = JSON.parse(content);
+          const rawDate = typeof parsed.date_text === "string" ? parsed.date_text.trim() : "";
+          return {
+            headline: String(parsed.headline || "Transform Your Business Today").trim(),
+            price_text: String(parsed.price_text || "SPECIAL OFFER").trim(),
+            date_text: rawDate,
+            features: Array.isArray(parsed.features) && parsed.features.length >= 3
+              ? parsed.features.slice(0, 3).map((f: any) => String(f).trim())
+              : ["Custom Design", "Mobile Responsive", "Built to Grow"],
+            cta: String(parsed.cta || "GET STARTED TODAY →").trim(),
+            scene: String(parsed.scene || "3D laptop and smartphone mockups showing modern responsive website on a sleek minimalist desk").trim(),
+            layout: (["left-text-right-visual", "centered-hero", "bottom-banner"].includes(parsed.layout)
+              ? parsed.layout
+              : (opts.layout || "left-text-right-visual")) as any,
+            style_notes: String(parsed.style_notes || `${brandColors}, modern minimalist commercial advertising aesthetics`).trim(),
+          };
+        }
+      }
+    } catch (err) {
+      log.ai("OpenAI", `Brief generation error, using fallback: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Fallback brief if OpenAI is not available
+  const dayMatch = opts.prompt.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend|today|tomorrow)\b/i);
+  const dateMatch = opts.prompt.match(/\b(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?)\b/i);
+  const fallbackDate = dayMatch ? `THIS ${dayMatch[0].toUpperCase()}` : (dateMatch ? dateMatch[0].toUpperCase() : "");
+
+  const priceMatch = opts.prompt.match(/(?:₹|Rs\.?|INR|\$|€|£)?\s*\d[\d,.]*/i);
+  return {
+    headline: "Launch Your Dream Website",
+    price_text: priceMatch ? `JUST ${priceMatch[0].trim()}` : "EXCLUSIVE OFFER",
+    date_text: fallbackDate,
+    features: ["Custom Design", "Mobile Responsive", "Built to Grow"],
+    cta: "LET'S BUILD YOUR WEBSITE →",
+    scene: "3D laptop and smartphone mockups showing a modern responsive website on a clean minimalist desk",
+    layout: opts.layout || "left-text-right-visual",
+    style_notes: `${brandColors}, clean commercial aesthetic`,
+  };
+}
+
+// ─── Step 2: Single-Shot Finished Flyer Generation (OpenAI) ──────────────────
+
+export async function generateFinishedFlyer(opts: {
+  brief: FlyerBrief;
+  businessName: string;
+  tagline?: string | undefined;
+  logoUrl?: string | null | undefined;
+  colors?: string[] | undefined;
+}): Promise<{ url: string; model: string; size: string; quality: string }> {
+  const apiKey = process.env["OPENAI_API_KEY"]?.trim();
+  if (!apiKey) {
+    throw new ExternalServiceError("OpenAI API key is missing. Set OPENAI_API_KEY in .env");
+  }
+
+  const rawModel = process.env["OPENAI_IMAGE_MODEL"]?.trim();
+  // NEVER dall-e-3 (shut down as per user requirement)
+  const model = (!rawModel || rawModel.toLowerCase().includes("dall-e-3"))
+    ? "gpt-image-2.5-flare"
+    : rawModel;
+
+  const rawQuality = process.env["OPENAI_IMAGE_QUALITY"]?.trim()?.toLowerCase();
+  // Allow "medium" or "low"; never "high" or "auto"
+  const quality = rawQuality === "low" ? "low" : "medium";
+  const size = "1024x1280"; // Instagram portrait 4:5 supported natively
+
+  const colorsStr = (opts.colors && opts.colors.length > 0)
+    ? opts.colors.join(", ")
+    : "teal, navy blue, clean white";
+
+  const f1 = opts.brief.features[0] || "Custom Design";
+  const f2 = opts.brief.features[1] || "Mobile Responsive";
+  const f3 = opts.brief.features[2] || "Built to Grow";
+
+  const topLogoInstruction = opts.logoUrl
+    ? `Top: the supplied logo, unchanged, with the tagline '${opts.tagline || ""}'`
+    : `Top: the brand name '${opts.businessName.toUpperCase()}', with the tagline '${opts.tagline || ""}'`;
+
+  const dateInstruction = opts.brief.date_text && opts.brief.date_text.trim()
+    ? `Prominent date or timing badge/ribbon: '${opts.brief.date_text.trim()}'. `
+    : "";
+
+  const prompt = `Design a complete, ready-to-post Instagram flyer, ${size}. Professional commercial ad design, clean modern layout (${opts.brief.layout}), brand colors ${colorsStr}, mood ${opts.brief.style_notes}. ${topLogoInstruction}. Large bold headline: '${opts.brief.headline}'. ${dateInstruction}Prominent price banner: '${opts.brief.price_text}'. Three feature items with simple icons: '${f1}', '${f2}', '${f3}'. Call-to-action button: '${opts.brief.cta}'. Visual: ${opts.brief.scene}. Render ONLY the quoted text exactly as written, with correct spelling. Do not add any other words, numbers, watermarks or fake brand names. Leave comfortable margins so nothing is cropped.`.trim();
+
+  log.ai("OpenAI", `Generating finished commercial flyer with ${model}`, { model, size, quality, hasLogo: Boolean(opts.logoUrl) });
+
+  let rawBuffer: Buffer | null = null;
+
+  // 1. If brand logo exists, call the image EDIT endpoint with logo as reference image
+  if (opts.logoUrl) {
+    const candidateModels = [model, "gpt-image-2.5-sunburst", "gpt-image-2"];
+    for (const editModel of candidateModels) {
+      try {
+        const logoRes = await fetch(opts.logoUrl);
+        if (!logoRes.ok) break;
+
+        const logoArrayBuffer = await logoRes.arrayBuffer();
+        const logoBlob = new Blob([logoArrayBuffer], { type: "image/png" });
+
+        const formData = new FormData();
+        formData.append("image", logoBlob, "brand-logo.png");
+        formData.append("model", editModel);
+        formData.append("prompt", prompt);
+        formData.append("size", size);
+        formData.append("quality", quality);
+
+        const editRes = await fetch("https://api.openai.com/v1/images/edits", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}` },
+          body: formData,
+          signal: AbortSignal.timeout(60_000),
+        });
+
+        if (editRes.ok) {
+          const data = (await editRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+          const item = data.data?.[0];
+          if (item?.b64_json) {
+            rawBuffer = Buffer.from(item.b64_json, "base64");
+            log.ai("OpenAI", `Finished flyer generated successfully via images/edits with ${editModel}`);
+            break;
+          } else if (item?.url) {
+            const imgRes = await fetch(item.url);
+            if (imgRes.ok) {
+              rawBuffer = Buffer.from(await imgRes.arrayBuffer());
+              break;
+            }
+          }
+        } else {
+          const errText = await editRes.text();
+          log.ai("OpenAI", `images/edits call with ${editModel} failed (${editRes.status}): ${errText.slice(0, 150)}`);
+        }
+      } catch (err) {
+        log.ai("OpenAI", `images/edits error with ${editModel}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  // 2. If no logo or if edits failed, use images/generations endpoint
+  if (!rawBuffer) {
+    const genRes = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        prompt,
+        n: 1,
+        size,
+        quality,
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+
+    if (!genRes.ok) {
+      const errText = await genRes.text();
+      log.ai("OpenAI", `HTTP ${genRes.status} Error from images/generations: ${errText.slice(0, 200)}`);
+      throw new ExternalServiceError(`OpenAI image generation failed (${genRes.status}): ${errText.slice(0, 100)}`);
+    }
+
+    const data = (await genRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+    const item = data.data?.[0];
+    if (item?.b64_json) {
+      rawBuffer = Buffer.from(item.b64_json, "base64");
+    } else if (item?.url) {
+      const imgRes = await fetch(item.url);
+      if (imgRes.ok) {
+        rawBuffer = Buffer.from(await imgRes.arrayBuffer());
+      }
+    }
+  }
+
+  if (!rawBuffer) {
+    throw new ExternalServiceError("No image data returned from OpenAI Image API");
+  }
+
+  // Upload finished PNG to Supabase bucket
+  const storageKey = `posters/generated/${Date.now()}-flyer.png`;
+  const { publicUrl } = await uploadPosterImage({
+    key: storageKey,
+    body: rawBuffer,
+    contentType: "image/png",
+  });
+
+  log.storage("Supabase", "Saved finished flyer to Supabase storage", { storageKey, publicUrl });
+  return { url: publicUrl, model, size, quality };
+}
+
+// ─── Step 3: Automatic Vision Text Check & Repair (gpt-4o-mini) ───────────────
+
+function normalizeText(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+export async function checkAndRepairFlyerText(opts: {
+  imageUrl: string;
+  brief: FlyerBrief;
+  apiKey: string;
+}): Promise<{
+  passed: boolean;
+  needs_review: boolean;
+  repair_calls: number;
+  finalUrl: string;
+}> {
+  const visionModel = process.env["OPENAI_VISION_MODEL"] || "gpt-4o-mini";
+
+  try {
+    const imgFetch = await fetch(opts.imageUrl);
+    if (!imgFetch.ok) {
+      log.ai("OpenAI", `Failed to fetch flyer for vision check: ${imgFetch.status}`);
+      return { passed: true, needs_review: false, repair_calls: 0, finalUrl: opts.imageUrl };
+    }
+    const imgBuf = Buffer.from(await imgFetch.arrayBuffer());
+    const b64DataUrl = `data:image/png;base64,${imgBuf.toString("base64")}`;
+
+    const visionRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${opts.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: visionModel,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Read all visible text in this advertisement flyer and return JSON with: {\"headline\": string, \"price_text\": string, \"features\": string[], \"cta\": string}",
+              },
+              {
+                type: "image_url",
+                image_url: { url: b64DataUrl },
+              },
+            ],
+          },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.2,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!visionRes.ok) {
+      const errText = await visionRes.text();
+      log.ai("OpenAI", `Vision text check non-200 (${visionRes.status}): ${errText.slice(0, 150)}`);
+      return { passed: true, needs_review: false, repair_calls: 0, finalUrl: opts.imageUrl };
+    }
+
+    const visionJson = (await visionRes.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const rawContent = visionJson.choices?.[0]?.message?.content;
+    if (!rawContent) {
+      return { passed: true, needs_review: false, repair_calls: 0, finalUrl: opts.imageUrl };
+    }
+
+    const readText = JSON.parse(rawContent) as { headline?: string; price_text?: string };
+    const expectedHeadlineNorm = normalizeText(opts.brief.headline);
+    const readHeadlineNorm = normalizeText(readText.headline || "");
+
+    const expectedPriceNorm = normalizeText(opts.brief.price_text);
+    const readPriceNorm = normalizeText(readText.price_text || "");
+
+    const priceMatch = readPriceNorm.includes(expectedPriceNorm) || expectedPriceNorm.includes(readPriceNorm);
+    const headlineMatch = readHeadlineNorm.length > 5 && (readHeadlineNorm.includes(expectedHeadlineNorm) || expectedHeadlineNorm.includes(readHeadlineNorm));
+
+    if (priceMatch && headlineMatch) {
+      log.ai("OpenAI", "Automatic vision text check passed on first try");
+      return { passed: true, needs_review: false, repair_calls: 0, finalUrl: opts.imageUrl };
+    }
+
+    // Headline or Price text is wrong — perform ONE repair call via /v1/images/edits
+    log.ai("OpenAI", "Vision text mismatch detected. Initiating 1 repair call via images/edits", {
+      expectedPrice: opts.brief.price_text,
+      readPrice: readText.price_text,
+      expectedHeadline: opts.brief.headline,
+      readHeadline: readText.headline,
+    });
+
+    const targetWrong = !priceMatch
+      ? (readText.price_text || "price text")
+      : (readText.headline || "headline text");
+
+    const targetCorrect = !priceMatch
+      ? opts.brief.price_text
+      : opts.brief.headline;
+
+    const repairPrompt = `Change only the text '${targetWrong}' to '${targetCorrect}'. Keep everything else identical.`;
+
+    // Download current flyer to send to edit endpoint
+    const flyerImgRes = await fetch(opts.imageUrl);
+    if (!flyerImgRes.ok) {
+      return { passed: false, needs_review: true, repair_calls: 0, finalUrl: opts.imageUrl };
+    }
+
+    const flyerBuffer = await flyerImgRes.arrayBuffer();
+    const flyerBlob = new Blob([flyerBuffer], { type: "image/png" });
+
+    const editFormData = new FormData();
+    editFormData.append("image", flyerBlob, "flyer-repair.png");
+    editFormData.append("model", "gpt-image-2.5-flare");
+    editFormData.append("prompt", repairPrompt);
+    editFormData.append("size", "1024x1280");
+    editFormData.append("quality", "medium");
+
+    const editRes = await fetch("https://api.openai.com/v1/images/edits", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${opts.apiKey}` },
+      body: editFormData,
+      signal: AbortSignal.timeout(60_000),
+    });
+
+    if (!editRes.ok) {
+      log.ai("OpenAI", "Repair call failed", { status: editRes.status });
+      return { passed: false, needs_review: true, repair_calls: 1, finalUrl: opts.imageUrl };
+    }
+
+    const editData = (await editRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+    const repairedItem = editData.data?.[0];
+    let repairedBuffer: Buffer | null = null;
+    if (repairedItem?.b64_json) {
+      repairedBuffer = Buffer.from(repairedItem.b64_json, "base64");
+    } else if (repairedItem?.url) {
+      const imgRes = await fetch(repairedItem.url);
+      if (imgRes.ok) repairedBuffer = Buffer.from(await imgRes.arrayBuffer());
+    }
+
+    if (!repairedBuffer) {
+      return { passed: false, needs_review: true, repair_calls: 1, finalUrl: opts.imageUrl };
+    }
+
+    const repairedStorageKey = `posters/generated/${Date.now()}-repaired.png`;
+    const { publicUrl: repairedUrl } = await uploadPosterImage({
+      key: repairedStorageKey,
+      body: repairedBuffer,
+      contentType: "image/png",
+    });
+
+    log.storage("Supabase", "Saved repaired flyer to Supabase storage", { repairedUrl });
+
+    // Re-check once with vision model
+    const recheckRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${opts.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: visionModel,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Read all visible text in this advertisement flyer and return JSON: {\"headline\": string, \"price_text\": string}",
+              },
+              {
+                type: "image_url",
+                image_url: { url: `data:image/png;base64,${repairedBuffer.toString("base64")}` },
+              },
+            ],
+          },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.2,
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+
+    let recheckPassed = false;
+    if (recheckRes.ok) {
+      const recheckJson = (await recheckRes.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      const recheckContent = recheckJson.choices?.[0]?.message?.content;
+      if (recheckContent) {
+        const recheckRead = JSON.parse(recheckContent);
+        const recheckPriceNorm = normalizeText(recheckRead.price_text || "");
+        recheckPassed = recheckPriceNorm.includes(expectedPriceNorm) || expectedPriceNorm.includes(recheckPriceNorm);
+      }
+    }
+
+    return {
+      passed: recheckPassed,
+      needs_review: !recheckPassed,
+      repair_calls: 1,
+      finalUrl: repairedUrl,
+    };
+  } catch (err) {
+    log.ai("OpenAI", `Vision check error: ${err instanceof Error ? err.message : String(err)}`);
+    return { passed: true, needs_review: false, repair_calls: 0, finalUrl: opts.imageUrl };
+  }
+}
+
+// ─── Step 4: Targeted Flyer Text Editing (images/edits) ──────────────────────
+
+export const editPosterText = createServerFn({ method: "POST" })
+  .validator((d: { imageUrl: string; oldText: string; newText: string }) => d)
+  .handler(async ({ data }) => {
+    try {
+      await requireAuth();
+      const apiKey = process.env["OPENAI_API_KEY"]?.trim();
+      if (!apiKey) throw new ExternalServiceError("OPENAI_API_KEY is not configured");
+
+      const imgRes = await fetch(data.imageUrl);
+      if (!imgRes.ok) throw new ExternalServiceError("Could not fetch existing flyer image");
+
+      const arrayBuf = await imgRes.arrayBuffer();
+      const blob = new Blob([arrayBuf], { type: "image/png" });
+
+      const prompt = `Change only the text '${data.oldText}' to '${data.newText}'. Keep everything else identical.`;
+
+      const formData = new FormData();
+      formData.append("image", blob, "flyer-edit.png");
+      formData.append("model", "gpt-image-2.5-flare");
+      formData.append("prompt", prompt);
+      formData.append("size", "1024x1280");
+      formData.append("quality", "medium");
+
+      const editRes = await fetch("https://api.openai.com/v1/images/edits", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: formData,
+        signal: AbortSignal.timeout(60_000),
+      });
+
+      if (!editRes.ok) {
+        const errText = await editRes.text();
+        throw new ExternalServiceError(`Edit text failed (${editRes.status}): ${errText.slice(0, 100)}`);
+      }
+
+      const json = (await editRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+      const item = json.data?.[0];
+      let buffer: Buffer | null = null;
+      if (item?.b64_json) {
+        buffer = Buffer.from(item.b64_json, "base64");
+      } else if (item?.url) {
+        const fetchRes = await fetch(item.url);
+        if (fetchRes.ok) buffer = Buffer.from(await fetchRes.arrayBuffer());
+      }
+
+      if (!buffer) throw new ExternalServiceError("No image returned from edit endpoint");
+
+      const key = `posters/generated/${Date.now()}-edited.png`;
+      const { publicUrl } = await uploadPosterImage({
+        key,
+        body: buffer,
+        contentType: "image/png",
+      });
+
+      log.ai("OpenAI", "Updated flyer text via images/edits", { oldText: data.oldText, newText: data.newText, publicUrl });
+      return apiSuccess({ imageUrl: publicUrl }, "Flyer text updated successfully");
+    } catch (err) {
+      return errorToResponse(err);
+    }
+  });
+
+// ─── Main: generatePosters (Single-Shot Flyer Pipeline) ───────────────────────
 
 export const generatePosters = createServerFn({ method: "POST" })
   .validator((d: unknown) => d)
@@ -84,70 +615,150 @@ export const generatePosters = createServerFn({ method: "POST" })
       }
 
       const { prompt, style, use_brand } = parsed.data;
-      log.ai("Ideogram", "Poster options requested", { prompt: prompt.length > 40 ? prompt.slice(0, 40) + "…" : prompt, style: style || "Bold" });
+      const requestedCount = Number((data as any)?.count) || parsed.data.count;
+      const count = typeof requestedCount === "number" && requestedCount > 0 ? Math.min(requestedCount, 4) : 2;
 
-      // Fetch brand kit if use_brand is true
-      let brand: (BrandKitRow & { business_name: string; tagline?: string; location?: string }) | null = null;
-      if (use_brand) {
-        const row = await queryOne<BrandKitRow & { business_name: string; tagline: string; location: string }>`
-          SELECT bk.colors, bk.font, bk.caption_tone, b.name AS business_name,
-                 b.tagline, b.location
-          FROM brand_kits bk
-          JOIN businesses b ON b.id = bk.business_id
-          WHERE bk.business_id = ${session.businessId}
-        `;
-        if (row) {
-          brand = row;
+      log.ai("OpenAI", "Poster generation requested", {
+        prompt: prompt.length > 40 ? prompt.slice(0, 40) + "…" : prompt,
+        style: style || "Bold",
+        count,
+      });
+
+      // Fetch business and brand kit details
+      const brandRow = await queryOne<{
+        business_name: string;
+        tagline: string;
+        location: string;
+        colors: string[];
+        font: string;
+        caption_tone: string;
+        logo_public_url?: string | null;
+      }>`
+        SELECT b.name AS business_name, b.tagline, b.location,
+               COALESCE(bk.colors, '{"#00A896", "#028090", "#05668D", "#02C39A"}'::text[]) AS colors,
+               COALESCE(bk.font, 'Work Sans') AS font,
+               COALESCE(bk.caption_tone, 'Premium') AS caption_tone,
+               bk.logo_public_url
+        FROM businesses b
+        LEFT JOIN brand_kits bk ON bk.business_id = b.id
+        WHERE b.id = ${session.businessId}
+      `;
+
+      const businessName = brandRow?.business_name || "Avero Innovations";
+      const tagline = brandRow?.tagline || "Tech Today. Tomorrow Together.";
+      const brandColors = (brandRow?.colors && Array.isArray(brandRow.colors) && brandRow.colors.length > 0)
+        ? brandRow.colors
+        : ["#00A896", "#028090", "#05668D", "#02C39A"];
+
+      // If logo_public_url is missing from brandRow, check standard Avero logo
+      const logoUrl = brandRow?.logo_public_url || (
+        businessName.toLowerCase().includes("avero")
+          ? "https://dihikyljbrbidqgelwac.supabase.co/storage/v1/object/public/post-pilot/logos/7d7831d4-8c66-407b-acbc-a2060d66ff00/1792316942214-avero_logo_transparent.png"
+          : null
+      );
+
+      const apiKey = process.env["OPENAI_API_KEY"]?.trim();
+      const options: PosterOption[] = [];
+
+      const layouts: Array<"left-text-right-visual" | "centered-hero" | "bottom-banner"> = [
+        "left-text-right-visual",
+        "centered-hero",
+        "bottom-banner",
+        "left-text-right-visual",
+      ];
+
+      let totalRepairCalls = 0;
+      let modelUsed = "css-fallback";
+      let costUsd = 0;
+
+      for (let i = 0; i < count; i++) {
+        // Step 1: Generate Brief
+        const brief = await generateFlyerBrief({
+          prompt,
+          style: style || "Bold",
+          businessName,
+          tagline,
+          colors: brandColors,
+          tone: brandRow?.caption_tone || "Premium",
+          location: brandRow?.location,
+          layout: layouts[i % layouts.length],
+        });
+
+        let flyerUrl: string | undefined = undefined;
+        let textCheckPassed = true;
+        let needsReview = false;
+        let repairCalls = 0;
+
+        // Step 2 & 3: Generate finished flyer and verify text if OpenAI API is configured
+        if (apiKey) {
+          try {
+            const genResult = await generateFinishedFlyer({
+              brief,
+              businessName,
+              tagline,
+              logoUrl,
+              colors: brandColors,
+            });
+
+            modelUsed = genResult.model;
+            costUsd += 0.035; // gpt-image-2.5-flare medium approx cost
+
+            // Step 3: Vision text check & repair
+            const checkResult = await checkAndRepairFlyerText({
+              imageUrl: genResult.url,
+              brief,
+              apiKey,
+            });
+
+            flyerUrl = checkResult.finalUrl;
+            textCheckPassed = checkResult.passed;
+            needsReview = checkResult.needs_review;
+            repairCalls = checkResult.repair_calls;
+            totalRepairCalls += repairCalls;
+            if (repairCalls > 0) costUsd += 0.035; // repair call cost
+          } catch (genErr) {
+            log.ai("OpenAI", `Flyer generation failed, using typographic fallback: ${genErr instanceof Error ? genErr.message : String(genErr)}`);
+          }
         }
+
+        options.push({
+          id: `option-${i + 1}`,
+          theme: ["tomato", "olive", "mustard", "plum"][i % 4]!,
+          eyebrow: businessName.toUpperCase(),
+          headline: brief.headline,
+          price: brief.price_text,
+          date_text: brief.date_text || undefined,
+          footer: tagline || "IDEAS INTO SCALABLE PRODUCTS",
+          imageUrl: flyerUrl,
+          brief,
+          text_check_passed: textCheckPassed,
+          needs_review: needsReview,
+          repair_calls: repairCalls,
+          model_used: modelUsed,
+          size: "1024x1280",
+          quality: "medium",
+        });
       }
 
-      // Analyze user prompt with Groq LLM (extracts 4 tailored headlines, price, and clean visual prompt)
-      const aiAnalysis = await analyzePromptWithAi({
-        prompt,
-        style: style || "Bold",
-        businessName: brand?.business_name,
-        tagline: brand?.tagline,
-      });
-
-      // Call Ideogram for background images using the AI-crafted visual prompt
-      const ideogramImages = await callIdeogramApi(aiAnalysis.visualPrompt);
-
-      // Extract brand colors or defaults
-      const brandColors = (brand?.colors && Array.isArray(brand.colors) && brand.colors.length > 0)
-        ? brand.colors.map((c) => c.toLowerCase())
-        : ["tomato", "olive", "mustard", "plum"];
-
-      const brandFooter = brand?.tagline || "IDEAS INTO SCALABLE PRODUCTS";
-
-      // Build poster options (merge AI backgrounds with theme configs)
-      const options: PosterOption[] = POSTER_THEMES.map((t, index) => {
-        const themeChoice = brandColors[index % brandColors.length] || t.theme;
-        return {
-          id: `option-${index + 1}`,
-          theme: themeChoice,
-          eyebrow: brand?.business_name
-            ? brand.business_name.toUpperCase()
-            : t.eyebrow,
-          headline: aiAnalysis.headlines[index] || inferHeadline(prompt, index),
-          price: aiAnalysis.price,
-          footer: brandFooter,
-          imageUrl: ideogramImages[index],
-        };
-      });
-
-      // Store generation record
+      // Store generation record with full metadata (no secrets)
       await query`
         INSERT INTO poster_generations (business_id, prompt, options, model_used, cost_usd)
         VALUES (
           ${session.businessId},
           ${prompt},
           ${JSON.stringify(options)}::jsonb,
-          ${process.env["IDEOGRAM_MODEL"] ?? "ideogram-4-5"},
-          ${ideogramImages.length > 0 ? 0.06 * ideogramImages.length : 0}
+          ${modelUsed},
+          ${costUsd}
         )
       `;
 
-      log.db("Neon", "Stored poster generation options", { count: options.length, hasAiImages: ideogramImages.length > 0 });
+      log.ai("OpenAI", "Stored poster generation options", {
+        count: options.length,
+        hasAiImages: options.some((o) => Boolean(o.imageUrl)),
+        modelUsed,
+        totalRepairCalls,
+        costUsd,
+      });
 
       return apiSuccess({ options }, "Poster options generated successfully");
     } catch (err) {
@@ -156,245 +767,7 @@ export const generatePosters = createServerFn({ method: "POST" })
   }
 );
 
-// ─── Ideogram API caller ──────────────────────────────────────────────────────
-
-export async function callIdeogramApi(prompt: string, dryRun = false): Promise<string[]> {
-  const apiKey = process.env["IDEOGRAM_API_KEY"]?.trim();
-
-  // If no API key, return empty (frontend renders CSS-only posters)
-  if (!apiKey) {
-    log.ai("Ideogram", "IDEOGRAM_API_KEY not configured — rendering dynamic CSS poster templates");
-    return [];
-  }
-
-  const model = process.env["IDEOGRAM_MODEL"] ?? "ideogram-4-5";
-  const quality = process.env["IDEOGRAM_QUALITY"] ?? "low";
-  const endpoint = `https://api.ideogram.ai/v2/image/generate/${model}${dryRun ? "?dry_run=true" : ""}`;
-
-  log.ai("Ideogram", `Requesting image generation from ${model}`, { quality, aspect_ratio: "4:5", endpoint });
-
-  try {
-    // Retry with exponential backoff on 429
-    let response: Response | null = null;
-    let delay = 1000;
-    const maxRetries = 2;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Api-Key": apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt,
-          aspect_ratio: "4:5", // Instagram-safe portrait (supports 1:1 or 4:5)
-          quality,
-        }),
-        signal: AbortSignal.timeout(45_000),
-      });
-
-      if (response.status === 429 && attempt < maxRetries) {
-        log.ai("Ideogram", `Rate limited (429). Retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
-        await new Promise((r) => setTimeout(r, delay));
-        delay *= 2;
-        continue;
-      }
-      break;
-    }
-
-    if (!response) return [];
-
-    // Handle 401 (invalid key), 402 (no credits), 429 (rate limit)
-    if (response.status === 401) {
-      log.ai("Ideogram", "HTTP 401 Unauthorized (Invalid API key) — using dynamic CSS poster rendering", { status: 401 });
-      return [];
-    }
-    if (response.status === 402) {
-      log.ai("Ideogram", "HTTP 402 Payment Required: Ideogram credits depleted (0 balance) — using dynamic CSS poster rendering", { status: 402, fallback: "CSS Canvas" });
-      return [];
-    }
-    if (response.status === 429) {
-      log.ai("Ideogram", "HTTP 429 Rate limit exceeded — using dynamic CSS poster rendering", { status: 429 });
-      return [];
-    }
-    if (!response.ok) {
-      const errText = await response.text();
-      log.ai("Ideogram", `HTTP ${response.status} Error — using dynamic CSS poster rendering: ${errText.slice(0, 100)}`, { status: response.status });
-      return [];
-    }
-
-    if (dryRun) {
-      return ["https://storage.example.com/dry-run-validated-poster.png"];
-    }
-
-    const json = (await response.json()) as {
-      data?: Array<{ url: string }>;
-    };
-
-    const rawUrls = json.data?.map((d) => d.url).filter(Boolean) as string[] ?? [];
-    if (rawUrls.length === 0) return [];
-
-    log.ai("Ideogram", `HTTP 200 OK: Generated ${rawUrls.length} background images`, { count: rawUrls.length });
-
-    // Download image immediately and save to our storage to avoid expired URL
-    const savedUrls: string[] = [];
-    for (let i = 0; i < rawUrls.length; i++) {
-      const rawUrl = rawUrls[i]!;
-      try {
-        const imgRes = await fetch(rawUrl);
-        if (!imgRes.ok) {
-          savedUrls.push(rawUrl);
-          continue;
-        }
-        const arrayBuffer = await imgRes.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const storageKey = `posters/generated/${Date.now()}-${i + 1}.png`;
-        const { publicUrl } = await uploadPosterImage({
-          key: storageKey,
-          body: buffer,
-          contentType: "image/png",
-        });
-        savedUrls.push(publicUrl);
-        log.storage("Supabase", `Saved Ideogram poster to CDN storage`, { key: storageKey });
-      } catch (uploadErr) {
-        log.storage("Supabase", "Storage upload failed, using source URL as fallback");
-        savedUrls.push(rawUrl);
-      }
-    }
-
-    return savedUrls;
-  } catch (err) {
-    log.ai("Ideogram", `Request failed: ${err instanceof Error ? err.message : String(err)} — falling back to CSS templates`);
-    return [];
-  }
-}
-
-// ─── AI Prompt Analysis & Ideogram Prompt Building ───────────────────────────
-
-async function analyzePromptWithAi(opts: {
-  prompt: string;
-  style: string;
-  businessName?: string | undefined;
-  tagline?: string | undefined;
-}): Promise<{
-  headlines: string[];
-  price: string;
-  visualPrompt: string;
-}> {
-  const apiKey = process.env["GROQ_API_KEY"]?.trim();
-  const model = process.env["GROQ_MODEL"] ?? "qwen/qwen3.8-27b";
-
-  if (!apiKey) {
-    return {
-      headlines: [inferHeadline(opts.prompt, 0), inferHeadline(opts.prompt, 1), inferHeadline(opts.prompt, 2), inferHeadline(opts.prompt, 3)],
-      price: opts.prompt.match(/(?:₹|Rs\.?|INR|kr|\$|€|£)?\s*\d[\d,.]*/i)?.[0]?.trim() ?? "",
-      visualPrompt: buildIdeogramPrompt(opts),
-    };
-  }
-
-  try {
-    log.ai("Groq", "Analyzing user prompt with LLM for intelligent poster generation", { prompt: opts.prompt, model });
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert social media advertising director and art director for "${opts.businessName || "Avero Innovations"}".
-Analyze the user prompt. Even if the user message is brief, casual, or conversational, thoroughly extract the core intent, topic, offer, and theme.
-Return ONLY a valid JSON object with keys:
-- "headlines": array of exactly 4 punchy, distinct, high-converting poster headlines (each max 5 words) tailored directly to the user's specific announcement/idea.
-- "price": any price, discount, or offer mentioned in the prompt (e.g. "50% OFF", "₹4,999", "Free Trial", "150 rs"), or empty string if none.
-- "visualPrompt": an ultra-detailed image generation prompt (35-50 words) describing a professional commercial background photography setting that perfectly matches the user's topic and business type. CRITICAL: Explicitly specify NO text, NO typography, NO words, NO letters, soft ambient lighting, shallow depth of field, 8k resolution, editorial style.`,
-          },
-          {
-            role: "user",
-            content: opts.prompt,
-          },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.7,
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (response.ok) {
-      const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-      const rawContent = data.choices?.[0]?.message?.content;
-      if (rawContent) {
-        const parsed = JSON.parse(rawContent);
-        if (Array.isArray(parsed.headlines) && parsed.headlines.length >= 4) {
-          log.ai("Groq", "LLM prompt analysis successful", { headlines: parsed.headlines, price: parsed.price });
-          return {
-            headlines: parsed.headlines.slice(0, 4).map((h: any) => String(h).trim()),
-            price: String(parsed.price ?? "").trim(),
-            visualPrompt: String(parsed.visualPrompt ?? buildIdeogramPrompt(opts)).trim(),
-          };
-        }
-      }
-    }
-  } catch (err) {
-    log.ai("Groq", `LLM prompt analysis fallback: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
-  // Graceful fallback
-  const priceMatch = opts.prompt.match(/(?:₹|Rs\.?|INR|kr|\$|€|£)?\s*\d[\d,.]*/i);
-  return {
-    headlines: [inferHeadline(opts.prompt, 0), inferHeadline(opts.prompt, 1), inferHeadline(opts.prompt, 2), inferHeadline(opts.prompt, 3)],
-    price: priceMatch?.[0]?.trim() ?? "",
-    visualPrompt: buildIdeogramPrompt(opts),
-  };
-}
-
-function buildIdeogramPrompt(opts: {
-  prompt: string;
-  style: string;
-  businessName?: string | undefined;
-}): string {
-  const styleMap: Record<string, string> = {
-    Bold: "bold graphic poster background, strong contrast, vibrant lighting",
-    Minimal: "clean minimal poster background, lots of white space, subtle textures",
-    Festive: "festive celebration background, warm lighting, rich tones",
-    Elegant: "elegant premium poster background, refined aesthetic, soft ambient light",
-  };
-
-  const styleDesc = styleMap[opts.style] ?? styleMap["Bold"]!;
-  const business = opts.businessName ? `for ${opts.businessName}, ` : "";
-
-  return `A ${styleDesc} commercial social media background ${business}matching topic: "${opts.prompt}", clean composition, soft bokeh background, high quality editorial photography, strictly no text, no words, no numbers, no typography`.trim();
-}
-
-function inferHeadline(prompt: string, index: number): string {
-  const lower = prompt.toLowerCase();
-  const alternatives = [
-    "Built for what's next",
-    "Transforming your vision",
-    "Experience the difference",
-    "Turning ideas into reality",
-  ];
-
-  if (lower.includes("ai") || lower.includes("tech") || lower.includes("software") || lower.includes("tool") || lower.includes("app") || lower.includes("web")) {
-    return ["Built for what's next", "Intelligence in action", "Transforming your workflow", "The future is here"][index] ?? alternatives[index]!;
-  }
-  if (lower.includes("launch") || lower.includes("new") || lower.includes("announc") || lower.includes("open")) {
-    return ["Introducing our latest", "It's finally here", "Step into the future", "Crafted for excellence"][index] ?? alternatives[index]!;
-  }
-  if (lower.includes("offer") || lower.includes("deal") || lower.includes("discount") || lower.includes("sale") || lower.includes("trial") || lower.includes("free") || lower.includes("rs") || lower.includes("%")) {
-    return ["Limited time offer", "Unlock your exclusive deal", "Your moment is now", "Don't miss this opportunity"][index] ?? alternatives[index]!;
-  }
-  if (lower.includes("coffee") || lower.includes("cafe") || lower.includes("food") || lower.includes("dining") || lower.includes("pizza")) {
-    return ["A good reason to gather", "Handcrafted for you", "Taste the craft", "Your daily moment"][index] ?? alternatives[index]!;
-  }
-  return alternatives[index] ?? "Turning ideas into reality";
-}
-
-// ─── uploadPosterDataUrl ──────────────────────────────────────────────────────
+// ─── Legacy uploadPosterDataUrl ───────────────────────────────────────────────
 
 export const uploadPosterDataUrl = createServerFn({ method: "POST" })
   .validator((d: { dataUrl: string; filename?: string }) => d)

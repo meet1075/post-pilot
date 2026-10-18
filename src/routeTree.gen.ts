@@ -10,11 +10,17 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LandingRouteImport } from './routes/landing'
 import { Route as AuthZernioCallbackRouteImport } from './routes/auth/zernio-callback'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LandingRoute = LandingRouteImport.update({
+  id: '/landing',
+  path: '/landing',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthZernioCallbackRoute = AuthZernioCallbackRouteImport.update({
@@ -25,27 +31,31 @@ const AuthZernioCallbackRoute = AuthZernioCallbackRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/landing': typeof LandingRoute
   '/auth/zernio-callback': typeof AuthZernioCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/landing': typeof LandingRoute
   '/auth/zernio-callback': typeof AuthZernioCallbackRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/landing': typeof LandingRoute
   '/auth/zernio-callback': typeof AuthZernioCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth/zernio-callback'
+  fullPaths: '/' | '/landing' | '/auth/zernio-callback'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth/zernio-callback'
-  id: '__root__' | '/' | '/auth/zernio-callback'
+  to: '/' | '/landing' | '/auth/zernio-callback'
+  id: '__root__' | '/' | '/landing' | '/auth/zernio-callback'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LandingRoute: typeof LandingRoute
   AuthZernioCallbackRoute: typeof AuthZernioCallbackRoute
 }
 
@@ -56,6 +66,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/landing': {
+      id: '/landing'
+      path: '/landing'
+      fullPath: '/landing'
+      preLoaderRoute: typeof LandingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth/zernio-callback': {
@@ -70,6 +87,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LandingRoute: LandingRoute,
   AuthZernioCallbackRoute: AuthZernioCallbackRoute,
 }
 export const routeTree = rootRouteImport

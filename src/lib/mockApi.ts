@@ -20,11 +20,19 @@ export interface PosterOption {
   eyebrow: string;
   headline: string;
   price: string;
+  date_text?: string | undefined;
   footer: string;
   imageUrl?: string | undefined;
+  brief?: any;
+  needs_review?: boolean | undefined;
+  text_check_passed?: boolean | undefined;
 }
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const SUPABASE_STORAGE_URL = "https://dihikyljbrbidqgelwac.supabase.co/storage/v1/object/public/post-pilot";
+const SHOWCASE_PIZZA_URL = `${SUPABASE_STORAGE_URL}/showcase/pizza_offer_showcase.jpg`;
+const SHOWCASE_CAFE_URL = `${SUPABASE_STORAGE_URL}/showcase/cafe_offer_showcase.jpg`;
 
 export const initialPosts: SocialPost[] = [
   {
@@ -37,6 +45,7 @@ export const initialPosts: SocialPost[] = [
     platform: "Instagram",
     theme: "tomato",
     price: "",
+    imageUrl: SHOWCASE_PIZZA_URL,
   },
   {
     id: "post-2",
@@ -48,17 +57,19 @@ export const initialPosts: SocialPost[] = [
     platform: "Instagram",
     theme: "cream",
     price: "129 kr",
+    imageUrl: SHOWCASE_CAFE_URL,
   },
   {
     id: "post-3",
     headline: "Two pizzas. One good plan.",
-    caption: "Make Saturday a little more delicious. Two pizzas for 999, dine-in only. #SaturdayPlans #PizzaForTwo",
+    caption: "Make Saturday a little more delicious. Two pizzas for $24, dine-in only. #SaturdayPlans #PizzaForTwo",
     date: "2026-10-18",
     time: "16:00",
     status: "Scheduled",
     platform: "Instagram",
     theme: "olive",
-    price: "999",
+    price: "$24",
+    imageUrl: SHOWCASE_PIZZA_URL,
   },
   {
     id: "post-4",
@@ -106,11 +117,12 @@ export async function generatePosters(
   prompt: string,
   style?: string,
   use_brand = true,
-  brandKit?: { businessName?: string; tagline?: string; colors?: string[] }
+  brandKit?: { businessName?: string; tagline?: string; colors?: string[] },
+  count = 2
 ): Promise<PosterOption[]> {
   try {
     const { generatePosters: serverGen } = await import("@/api/posters");
-    const res = await serverGen({ data: { prompt, style: (style as any) || "Bold", use_brand } });
+    const res = await serverGen({ data: { prompt, style: (style as any) || "Bold", use_brand, count } });
     const rawOptions = (res as any)?.data?.options ?? (res as any)?.options;
     if (Array.isArray(rawOptions) && rawOptions.length > 0) {
       return rawOptions;
@@ -130,13 +142,23 @@ export async function generatePosters(
   const brandEyebrow = brandKit?.businessName ? brandKit.businessName.toUpperCase() : null;
   const brandFooter = brandKit?.tagline || "IDEAS INTO SCALABLE PRODUCTS";
 
-  return styles.map((s, index) => ({
+  const fallbackImage = prompt.toLowerCase().includes("coffee") || prompt.toLowerCase().includes("brunch") || prompt.toLowerCase().includes("cafe")
+    ? SHOWCASE_CAFE_URL
+    : SHOWCASE_PIZZA_URL;
+
+  const dayMatch = prompt.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend|today|tomorrow)\b/i);
+  const dateMatch = prompt.match(/\b(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?)\b/i);
+  const detectedDate = dayMatch ? `THIS ${dayMatch[0].toUpperCase()}` : (dateMatch ? dateMatch[0].toUpperCase() : "");
+
+  return styles.slice(0, count).map((s, index) => ({
     id: `option-${index + 1}`,
     theme: brandColors[index % brandColors.length] || s.theme,
     eyebrow: brandEyebrow || s.eyebrow,
     headline: [headline, "Built for what's next", "A reason to connect", "Experience the difference"][index] ?? headline,
     price,
+    date_text: detectedDate || undefined,
     footer: brandFooter,
+    imageUrl: fallbackImage,
   }));
 }
 
