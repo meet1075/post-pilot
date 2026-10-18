@@ -20,7 +20,7 @@ let _sql: ReturnType<typeof neon> | null = null;
  */
 export function getDb(): ReturnType<typeof neon> {
   if (!_sql) {
-    const url = process.env["DATABASE_URL"];
+    const url = process.env["DATABASE_URL"] || (globalThis as any).__env__?.["DATABASE_URL"];
     if (!url) throw new Error("DATABASE_URL environment variable is not set");
     _sql = neon(url);
   }

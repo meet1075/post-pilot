@@ -24,6 +24,8 @@ import { UnauthorizedError, AppError } from "./errors.js";
 export interface SessionUser {
   userId: string;
   email: string;
+  name?: string;
+  image?: string;
   businessId?: string | undefined;
 }
 
@@ -160,50 +162,66 @@ export async function verifyMagicToken(email: string, rawToken: string): Promise
 // ─── requireAuth() guard ──────────────────────────────────────────────────────
 
 /**
- * Extract and verify the JWT from a Request Authorization header.
- * If request is omitted, automatically retrieves it from getRequest().
+ * Extract and verify the JWT from a Request Authorization header or Better Auth cookie.
+ * If request is omitted, automatically retrieves headers from TanStack Start.
  *
  *   const session = await requireAuth();
  */
 export async function requireAuth(request?: Request): Promise<SessionUser> {
-  const req = request ?? getRequest();
+  let headers: Headers | Record<string, string> | undefined;
+  if (request) {
+    headers = request.headers;
+  } else {
+    try {
+      const { getRequestHeaders, getRequest } = await import("@tanstack/react-start/server");
+      try {
+        headers = getRequestHeaders();
+      } catch {
+        headers = getRequest()?.headers;
+      }
+    } catch {}
+  }
 
   // 1. Try Better Auth session first (cookie from Google sign-in)
   try {
     const { auth } = await import("./auth-server.js");
-    const betterSession = await auth.api.getSession({
-      headers: req.headers,
-    });
-    if (betterSession?.user) {
-      const user = betterSession.user;
-      let business = await queryOne<{ id: string; name: string }>`
-        SELECT id, name FROM businesses
-        WHERE owner_id = ${user.id} AND deleted_at IS NULL
-        ORDER BY created_at ASC
-        LIMIT 1
-      `;
-
-      if (!business) {
-        const defaultName = user.name ? `${user.name}'s Workspace` : "My Business";
-        business = await queryOne<{ id: string; name: string }>`
-          INSERT INTO businesses (owner_id, name, business_type, location)
-          VALUES (${user.id}, ${defaultName}, 'General', 'Global')
-          RETURNING id, name
+    if (headers) {
+      const betterSession = await auth.api.getSession({
+        headers: headers as any,
+      });
+      if (betterSession?.user) {
+        const user = betterSession.user;
+        let business = await queryOne<{ id: string; name: string }>`
+          SELECT id, name FROM businesses
+          WHERE owner_id = ${user.id} AND deleted_at IS NULL
+          ORDER BY created_at ASC
+          LIMIT 1
         `;
-      }
 
-      return {
-        userId: user.id,
-        email: user.email,
-        ...(business?.id ? { businessId: business.id } : {}),
-      };
+        if (!business) {
+          const defaultName = user.name ? `${user.name}'s Workspace` : "My Business";
+          business = await queryOne<{ id: string; name: string }>`
+            INSERT INTO businesses (owner_id, name, business_type, location)
+            VALUES (${user.id}, ${defaultName}, 'General', 'Global')
+            RETURNING id, name
+          `;
+        }
+
+        return {
+          userId: user.id,
+          email: user.email,
+          name: (user as any).name,
+          image: (user as any).image,
+          ...(business?.id ? { businessId: business.id } : {}),
+        };
+      }
     }
   } catch {
     // Continue to Bearer token fallback
   }
 
   // 2. Fallback to Authorization: Bearer JWT header
-  const authHeader = req.headers.get("Authorization");
+  const authHeader = (headers instanceof Headers ? headers.get("Authorization") : (headers as any)?.["authorization"]) ?? null;
   if (!authHeader?.startsWith("Bearer ")) {
     throw new UnauthorizedError();
   }

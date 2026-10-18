@@ -2,7 +2,7 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
-import { auth } from "./lib/auth-server";
+import { auth, getAuth } from "./lib/auth-server";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -48,9 +48,28 @@ function isH3SwallowedErrorBody(body: string): boolean {
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      // Synchronize Cloudflare Worker env globally and into process.env immediately
+      (globalThis as any).__env__ = env;
+      if (env && typeof env === "object") {
+        for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
+          if (typeof value === "string") {
+            process.env[key] = value;
+          }
+        }
+      }
+
       const url = new URL(request.url);
       if (url.pathname.startsWith("/api/auth")) {
-        return await auth.handler(request);
+        try {
+          const authInstance = getAuth(env);
+          return await authInstance.handler(request);
+        } catch (authError) {
+          console.error("[Better-Auth Handler Exception]", authError);
+          return new Response(JSON.stringify({ error: authError instanceof Error ? authError.message : "Authentication error" }), {
+            status: 500,
+            headers: { "content-type": "application/json" },
+          });
+        }
       }
 
       const handler = await getServerEntry();

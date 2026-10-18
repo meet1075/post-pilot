@@ -49,7 +49,8 @@ import {
   type PostStatus,
   type SocialPost,
 } from "@/lib/mockApi";
-import { signIn, signOut, useSession } from "@/lib/auth-client";
+import { signIn, signOut, useSession, getSession } from "@/lib/auth-client";
+import { getSession as getServerSession } from "@/api/auth";
 import { getAccounts, connectAccount, disconnectAccount, getZernioConnectUrl } from "@/api/accounts";
 import { getPosts } from "@/api/posts";
 import { uploadPosterDataUrl } from "@/api/posters";
@@ -61,6 +62,23 @@ import { LandingPage } from "@/components/LandingPage";
 type Page = "Home" | "Create" | "Scheduled" | "Posted" | "Brand kit" | "Accounts" | "Settings";
 
 export const Route = createFileRoute("/")({
+  loader: async () => {
+    try {
+      const res = await getServerSession();
+      return {
+        initialUser: res?.session
+          ? {
+              id: (res.session as any).userId,
+              email: (res.session as any).email,
+              name: (res.session as any).name,
+              image: (res.session as any).image,
+            }
+          : null,
+      };
+    } catch {
+      return { initialUser: null };
+    }
+  },
   head: () => ({
     meta: [
       { title: "PostPilot — Social posts, made simple | AI Social Media Generator" },
@@ -179,7 +197,20 @@ const palette = [
 ];
 
 function PostPilot() {
+  const loaderData = Route.useLoaderData();
   const { data: session, isPending: isSessionPending } = useSession();
+  const [clientChecked, setClientChecked] = useState(false);
+
+  useEffect(() => {
+    if (!session?.user && !loaderData?.initialUser) {
+      getSession()
+        .catch(() => {})
+        .finally(() => setClientChecked(true));
+    } else {
+      setClientChecked(true);
+    }
+  }, [session?.user, loaderData?.initialUser]);
+
   const [page, setPage] = useState<Page>("Home");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [posts, setPosts] = useState<SocialPost[]>(() => {
@@ -205,7 +236,7 @@ function PostPilot() {
   const [businessMenuOpen, setBusinessMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
-  const activeUser = session?.user;
+  const activeUser = session?.user ?? (loaderData?.initialUser as any);
   const isMeetSoni = activeUser?.email === "meetsoni1075@gmail.com";
 
   // Persistent brand kit state shared across CreateFlow and BrandKit
@@ -326,7 +357,7 @@ function PostPilot() {
   };
 
   // If session is still verifying, show clean splash screen to avoid login screen flash
-  if (isSessionPending) {
+  if ((isSessionPending && !activeUser) || (!activeUser && !clientChecked)) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center">
         <div className="flex items-center gap-3 animate-pulse">
