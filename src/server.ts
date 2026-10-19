@@ -48,10 +48,15 @@ function isH3SwallowedErrorBody(body: string): boolean {
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
-      // Synchronize Cloudflare Worker env globally and into process.env immediately
-      (globalThis as any).__env__ = env;
-      if (env && typeof env === "object") {
-        for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
+      // Resolve Cloudflare Worker env from either argument, request context, or globalThis.__env__
+      const cfEnv =
+        (env && typeof env === "object")
+          ? env
+          : (request as any)?.runtime?.cloudflare?.env ?? (globalThis as any).__env__;
+
+      if (cfEnv && typeof cfEnv === "object") {
+        (globalThis as any).__env__ = cfEnv;
+        for (const [key, value] of Object.entries(cfEnv as Record<string, unknown>)) {
           if (typeof value === "string") {
             process.env[key] = value;
           }
@@ -61,10 +66,15 @@ export default {
       const url = new URL(request.url);
       if (url.pathname.startsWith("/api/auth")) {
         try {
-          const authInstance = getAuth(env);
+          const authInstance = getAuth(cfEnv, request);
           return await authInstance.handler(request);
         } catch (authError) {
           console.error("[Better-Auth Handler Exception]", authError);
+          if (authError && typeof authError === "object" && "status" in authError && typeof (authError as any).status === "number") {
+            const status = (authError as any).status;
+            const headers = (authError as any).headers || {};
+            return new Response((authError as any).body || null, { status, headers });
+          }
           return new Response(JSON.stringify({ error: authError instanceof Error ? authError.message : "Authentication error" }), {
             status: 500,
             headers: { "content-type": "application/json" },

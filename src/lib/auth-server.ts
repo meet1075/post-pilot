@@ -9,8 +9,15 @@
  */
 
 import { betterAuth } from "better-auth";
-import { Pool } from "@neondatabase/serverless";
+import { Pool, neonConfig } from "@neondatabase/serverless";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
+
+// Force Neon to execute queries via low-latency HTTP fetch instead of WebSockets,
+// preventing WebSocket hangs and Cloudflare Error 1101 on Workers edge runtime
+if (typeof WebSocket !== "undefined") {
+  neonConfig.webSocketConstructor = WebSocket;
+}
+neonConfig.poolQueryViaFetch = true;
 
 function syncEnv(envObj?: unknown) {
   // Check Cloudflare Worker env passed directly or via Nitro global
@@ -21,7 +28,7 @@ function syncEnv(envObj?: unknown) {
   for (const src of sources) {
     if (src && typeof src === "object") {
       for (const [k, v] of Object.entries(src as Record<string, unknown>)) {
-        if (typeof v === "string" && (!process.env[k] || process.env[k] === "")) {
+        if (typeof v === "string" && v.trim() !== "") {
           process.env[k] = v;
         }
       }
@@ -35,10 +42,15 @@ syncEnv();
 let _auth: any = null;
 let _cachedDbUrl = "";
 
-export function getAuth(envObj?: unknown): any {
+export function getAuth(envObj?: unknown, request?: Request): any {
   syncEnv(envObj);
 
-  const rawBaseUrl = process.env["BETTER_AUTH_URL"] ?? process.env["PUBLIC_APP_URL"] ?? "http://localhost:8080";
+  let rawBaseUrl = process.env["BETTER_AUTH_URL"] ?? process.env["PUBLIC_APP_URL"] ?? "http://localhost:8080";
+  if (request) {
+    try {
+      rawBaseUrl = new URL(request.url).origin;
+    } catch {}
+  }
   // Always strip trailing slashes to prevent double slashes in OAuth callback URLs (e.g. "//api/auth/callback/google")
   const cleanBaseUrl = rawBaseUrl.replace(/\/+$/, "");
 

@@ -508,8 +508,14 @@ function PostPilot() {
                   setAccountMenuOpen(false);
                   try {
                     await signOut();
+                  } catch (err) {
+                    console.error("Sign out error:", err);
+                  }
+                  try {
+                    localStorage.removeItem("postpilot_cached_posts");
                   } catch {}
                   toast.success("Signed out successfully");
+                  window.location.href = "/";
                 }}
               >
                 <LogOut className="mr-2 h-3.5 w-3.5" /> Sign out
