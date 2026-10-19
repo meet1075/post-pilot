@@ -2,7 +2,7 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
-import { auth, getAuth } from "./lib/auth-server";
+import { auth, getAuth, getActivePool } from "./lib/auth-server";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -67,9 +67,24 @@ export default {
       if (url.pathname.startsWith("/api/auth")) {
         try {
           const authInstance = getAuth(cfEnv, request);
-          return await authInstance.handler(request);
+          const response = await authInstance.handler(request);
+          const currentPool = getActivePool();
+          if (currentPool) {
+            const waitUntil = (ctx as any)?.waitUntil ?? (request as any)?.waitUntil;
+            if (typeof waitUntil === "function") {
+              waitUntil(currentPool.end().catch(() => {}));
+            }
+          }
+          return response;
         } catch (authError) {
           console.error("[Better-Auth Handler Exception]", authError);
+          const currentPool = getActivePool();
+          if (currentPool) {
+            const waitUntil = (ctx as any)?.waitUntil ?? (request as any)?.waitUntil;
+            if (typeof waitUntil === "function") {
+              waitUntil(currentPool.end().catch(() => {}));
+            }
+          }
           if (authError && typeof authError === "object" && "status" in authError && typeof (authError as any).status === "number") {
             const status = (authError as any).status;
             const headers = (authError as any).headers || {};

@@ -41,6 +41,11 @@ syncEnv();
 
 let _auth: any = null;
 let _cachedDbUrl = "";
+let _activePool: Pool | null = null;
+
+export function getActivePool(): Pool | null {
+  return _activePool;
+}
 
 export function getAuth(envObj?: unknown, request?: Request): any {
   syncEnv(envObj);
@@ -58,10 +63,14 @@ export function getAuth(envObj?: unknown, request?: Request): any {
 
   if (!_auth || (_cachedDbUrl !== databaseUrl && databaseUrl !== "")) {
     _cachedDbUrl = databaseUrl;
+    _activePool = new Pool({
+      connectionString: databaseUrl,
+      max: 1,
+      idleTimeoutMillis: 100,
+      maxUses: 1,
+    });
     _auth = betterAuth({
-      database: new Pool({
-        connectionString: databaseUrl,
-      }),
+      database: _activePool,
       baseURL: cleanBaseUrl,
       trustedOrigins: [
         cleanBaseUrl,
