@@ -186,25 +186,48 @@ export async function requireAuth(request?: Request): Promise<SessionUser> {
   try {
     const { auth } = await import("./auth-server.js");
     if (headers) {
+      let headersObj: Headers;
+      if (headers instanceof Headers) {
+        headersObj = headers;
+      } else {
+        headersObj = new Headers();
+        for (const [key, value] of Object.entries(headers)) {
+          if (typeof value === "string") {
+            headersObj.set(key, value);
+          }
+        }
+      }
+
       const betterSession = await auth.api.getSession({
-        headers: headers as any,
+        headers: headersObj,
       });
+
       if (betterSession?.user) {
         const user = betterSession.user;
-        let business = await queryOne<{ id: string; name: string }>`
-          SELECT id, name FROM businesses
-          WHERE owner_id = ${user.id} AND deleted_at IS NULL
-          ORDER BY created_at ASC
-          LIMIT 1
-        `;
+        let businessId: string | undefined;
 
-        if (!business) {
-          const defaultName = user.name ? `${user.name}'s Workspace` : "My Business";
-          business = await queryOne<{ id: string; name: string }>`
-            INSERT INTO businesses (owner_id, name, business_type, location)
-            VALUES (${user.id}, ${defaultName}, 'General', 'Global')
-            RETURNING id, name
+        try {
+          let business = await queryOne<{ id: string; name: string }>`
+            SELECT id, name FROM businesses
+            WHERE owner_id = ${user.id} AND deleted_at IS NULL
+            ORDER BY created_at ASC
+            LIMIT 1
           `;
+
+          if (!business) {
+            const defaultName = user.name ? `${user.name}'s Workspace` : "My Business";
+            business = await queryOne<{ id: string; name: string }>`
+              INSERT INTO businesses (owner_id, name, business_type, location)
+              VALUES (${user.id}, ${defaultName}, 'General', 'Global')
+              RETURNING id, name
+            `;
+          }
+
+          if (business?.id) {
+            businessId = business.id;
+          }
+        } catch (dbErr) {
+          console.warn("[requireAuth] Failed to load or initialize business for user:", dbErr);
         }
 
         return {
@@ -212,11 +235,12 @@ export async function requireAuth(request?: Request): Promise<SessionUser> {
           email: user.email,
           name: (user as any).name,
           image: (user as any).image,
-          ...(business?.id ? { businessId: business.id } : {}),
+          ...(businessId ? { businessId } : {}),
         };
       }
     }
-  } catch {
+  } catch (authErr) {
+    console.warn("[requireAuth] Better Auth session check failed:", authErr);
     // Continue to Bearer token fallback
   }
 

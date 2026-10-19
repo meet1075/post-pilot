@@ -99,6 +99,13 @@ export default {
 
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
+      const currentPool = getActivePool();
+      if (currentPool) {
+        const waitUntil = (ctx as any)?.waitUntil ?? (request as any)?.waitUntil;
+        if (typeof waitUntil === "function") {
+          waitUntil(currentPool.end().catch(() => {}));
+        }
+      }
       return await normalizeCatastrophicSsrResponse(response);
     } catch (error) {
       console.error(error);

@@ -200,15 +200,25 @@ function PostPilot() {
   const loaderData = Route.useLoaderData();
   const { data: session, isPending: isSessionPending } = useSession();
   const [clientChecked, setClientChecked] = useState(false);
+  const [clientUser, setClientUser] = useState<any>(null);
 
   useEffect(() => {
-    if (!session?.user && !loaderData?.initialUser) {
-      getSession()
-        .catch(() => {})
-        .finally(() => setClientChecked(true));
-    } else {
+    if (loaderData?.initialUser || session?.user) {
       setClientChecked(true);
+      return;
     }
+
+    // Query client session to ensure freshly established cookies from OAuth callback are recognized immediately
+    getSession()
+      .then((res) => {
+        if (res?.data?.user) {
+          setClientUser(res.data.user);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setClientChecked(true);
+      });
   }, [session?.user, loaderData?.initialUser]);
 
   const [page, setPage] = useState<Page>("Home");
@@ -236,7 +246,7 @@ function PostPilot() {
   const [businessMenuOpen, setBusinessMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
-  const activeUser = session?.user ?? (loaderData?.initialUser as any);
+  const activeUser = session?.user ?? clientUser ?? (loaderData?.initialUser as any);
   const isMeetSoni = activeUser?.email === "meetsoni1075@gmail.com";
 
   // Persistent brand kit state shared across CreateFlow and BrandKit
@@ -511,6 +521,7 @@ function PostPilot() {
                   } catch (err) {
                     console.error("Sign out error:", err);
                   }
+                  setClientUser(null);
                   try {
                     localStorage.removeItem("postpilot_cached_posts");
                   } catch {}
