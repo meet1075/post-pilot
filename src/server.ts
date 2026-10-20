@@ -97,6 +97,7 @@ export default {
         try {
           const authInstance = getAuth(cfEnv, request);
           const response = await authInstance.handler(request);
+          console.log(`[AUTH ${request.method}] ${url.pathname} - ${response.status}`);
           // Merge CORS headers so browser Network tab can inspect all responses
           const newHeaders = new Headers(response.headers);
           for (const [k, v] of Object.entries(corsHeaders)) {
@@ -109,7 +110,7 @@ export default {
             headers: newHeaders,
           });
         } catch (authError) {
-          console.error("[Better-Auth Handler Exception]", authError);
+          console.error(`[AUTH Error] ${request.method} ${url.pathname}:`, authError);
           const status =
             typeof (authError as any)?.statusCode === "number"
               ? (authError as any).statusCode
@@ -151,11 +152,15 @@ export default {
         }
       }
 
+      const startMs = Date.now();
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      const normalizedResponse = await normalizeCatastrophicSsrResponse(response);
+      const durationMs = Date.now() - startMs;
+      console.log(`[HTTP ${request.method}] ${url.pathname} - ${normalizedResponse.status} (${durationMs}ms)`);
+      return normalizedResponse;
     } catch (error) {
-      console.error(error);
+      console.error(`[Server Error] ${request.method} ${request.url}:`, error);
       const url = new URL(request.url);
       const isApiRequest =
         url.pathname.startsWith("/api/") ||
