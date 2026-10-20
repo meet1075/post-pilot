@@ -51,9 +51,11 @@ export function getAuth(envObj?: unknown, request?: Request): any {
   syncEnv(envObj);
 
   let rawBaseUrl = process.env["BETTER_AUTH_URL"] ?? process.env["PUBLIC_APP_URL"] ?? "http://localhost:8080";
+  let requestOrigin = "";
   if (request) {
     try {
-      rawBaseUrl = new URL(request.url).origin;
+      requestOrigin = new URL(request.url).origin;
+      rawBaseUrl = requestOrigin;
     } catch {}
   }
   // Always strip trailing slashes to prevent double slashes in OAuth callback URLs (e.g. "//api/auth/callback/google")
@@ -72,12 +74,15 @@ export function getAuth(envObj?: unknown, request?: Request): any {
     _auth = betterAuth({
       database: _activePool,
       baseURL: cleanBaseUrl,
-      trustedOrigins: [
-        cleanBaseUrl,
-        "https://post-pilot.meetsoni1075.workers.dev",
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
-      ],
+      trustedOrigins: Array.from(
+        new Set([
+          cleanBaseUrl,
+          requestOrigin,
+          "https://post-pilot.meetsoni1075.workers.dev",
+          "http://localhost:8080",
+          "http://127.0.0.1:8080",
+        ])
+      ).filter(Boolean),
       secret: process.env["BETTER_AUTH_SECRET"] ?? process.env["JWT_SECRET"] ?? "postpilot-auth-secret-key-32charsmin",
       socialProviders: {
         google: {

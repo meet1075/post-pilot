@@ -2514,11 +2514,26 @@ function SignInScreen() {
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
     try {
-      await signIn.social({
+      const res = await signIn.social({
         provider: "google",
         callbackURL: "/",
       });
+
+      if ((res as any)?.error) {
+        const errorMsg =
+          (res as any).error.message ||
+          (res as any).error.statusText ||
+          "Failed to initiate Google sign-in. Check GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.";
+        console.error("[Google Sign-In Error]", (res as any).error);
+        toast.error(errorMsg);
+        return;
+      }
+
+      if ((res as any)?.data?.url) {
+        window.location.href = (res as any).data.url;
+      }
     } catch (err: any) {
+      console.error("[Google Sign-In Exception]", err);
       toast.error(err?.message || "Failed to initiate Google sign-in. Check GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.");
     } finally {
       setGoogleLoading(false);

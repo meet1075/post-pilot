@@ -64,7 +64,36 @@ export default {
       }
 
       const url = new URL(request.url);
+
+      // Compute CORS headers for the request origin so responses are visible in browser DevTools
+      const reqOrigin = request.headers.get("origin") || "";
+      const isAllowedOrigin =
+        !reqOrigin ||
+        reqOrigin.includes("workers.dev") ||
+        reqOrigin.includes("localhost") ||
+        reqOrigin.includes("127.0.0.1") ||
+        reqOrigin.startsWith("http");
+
+      const effectiveOrigin = isAllowedOrigin ? (reqOrigin || "*") : "*";
+      const corsHeaders: Record<string, string> = {
+        "Access-Control-Allow-Origin": effectiveOrigin,
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD",
+        "Access-Control-Allow-Headers":
+          request.headers.get("access-control-request-headers") ||
+          "Content-Type, Authorization, Cookie, X-Requested-With, sentry-trace, baggage, Accept",
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Max-Age": "86400",
+      };
+
       if (url.pathname.startsWith("/api/auth")) {
+        // Handle CORS preflight directly to avoid 404 on browser preflight checks
+        if (request.method === "OPTIONS") {
+          return new Response(null, {
+            status: 204,
+            headers: corsHeaders,
+          });
+        }
+
         try {
           const authInstance = getAuth(cfEnv, request);
           const response = await authInstance.handler(request);
@@ -75,7 +104,18 @@ export default {
               waitUntil(currentPool.end().catch(() => {}));
             }
           }
-          return response;
+
+          // Merge CORS headers so browser Network tab can inspect all responses
+          const newHeaders = new Headers(response.headers);
+          for (const [k, v] of Object.entries(corsHeaders)) {
+            newHeaders.set(k, v);
+          }
+
+          return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: newHeaders,
+          });
         } catch (authError) {
           console.error("[Better-Auth Handler Exception]", authError);
           const currentPool = getActivePool();
@@ -85,15 +125,45 @@ export default {
               waitUntil(currentPool.end().catch(() => {}));
             }
           }
-          if (authError && typeof authError === "object" && "status" in authError && typeof (authError as any).status === "number") {
-            const status = (authError as any).status;
-            const headers = (authError as any).headers || {};
-            return new Response((authError as any).body || null, { status, headers });
-          }
-          return new Response(JSON.stringify({ error: authError instanceof Error ? authError.message : "Authentication error" }), {
-            status: 500,
-            headers: { "content-type": "application/json" },
-          });
+
+          const status =
+            typeof (authError as any)?.statusCode === "number"
+              ? (authError as any).statusCode
+              : typeof (authError as any)?.status === "number"
+              ? (authError as any).status
+              : 500;
+
+          const message =
+            authError instanceof Error
+              ? authError.message
+              : typeof authError === "string"
+              ? authError
+              : "Authentication request failed";
+
+          const bodyContent = (authError as any)?.body;
+          const details =
+            bodyContent && typeof bodyContent === "object"
+              ? bodyContent
+              : bodyContent
+              ? String(bodyContent)
+              : null;
+
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: message,
+              details,
+              status,
+              path: url.pathname,
+            }),
+            {
+              status,
+              headers: {
+                ...corsHeaders,
+                "Content-Type": "application/json; charset=utf-8",
+              },
+            }
+          );
         }
       }
 
@@ -109,6 +179,31 @@ export default {
       return await normalizeCatastrophicSsrResponse(response);
     } catch (error) {
       console.error(error);
+      const url = new URL(request.url);
+      const isApiRequest =
+        url.pathname.startsWith("/api/") ||
+        url.pathname.startsWith("/_server") ||
+        request.headers.get("accept")?.includes("application/json");
+
+      if (isApiRequest) {
+        const reqOrigin = request.headers.get("origin") || "*";
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: error instanceof Error ? error.message : "Internal Server Error",
+            path: url.pathname,
+          }),
+          {
+            status: 500,
+            headers: {
+              "Access-Control-Allow-Origin": reqOrigin,
+              "Access-Control-Allow-Credentials": "true",
+              "Content-Type": "application/json; charset=utf-8",
+            },
+          }
+        );
+      }
+
       return new Response(renderErrorPage(), {
         status: 500,
         headers: { "content-type": "text/html; charset=utf-8" },
