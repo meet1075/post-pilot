@@ -33,7 +33,9 @@ import { apiSuccess, formatZodIssues } from "../lib/apiResponse.js";
 export interface FlyerBrief {
   headline: string;
   price_text: string;
+  badge_text?: string | undefined;
   date_text?: string | undefined;
+  venue_text?: string | undefined;
   features: string[];
   cta: string;
   scene: string;
@@ -48,6 +50,7 @@ export interface PosterOption {
   headline: string;
   price: string;
   date_text?: string | undefined;
+  venue_text?: string | undefined;
   footer: string;
   imageUrl?: string | undefined;
   brief?: FlyerBrief | undefined;
@@ -92,22 +95,31 @@ Input is the user's prompt, the business brand kit (name, tagline, colors, tone,
 
 Return exactly one JSON brief:
 {
-  "headline": "4-6 words, faithful to the user's offer",
-  "price_text": "exact price/offer string with currency, e.g. JUST ₹9,999 or 20% OFF",
-  "date_text": "exact date, day of week, or duration if mentioned in the prompt (e.g. 'THIS SATURDAY ONLY', 'EVERY SATURDAY', 'VALID TILL 25TH OCT', 'THIS WEEKEND'). If NO date or day is mentioned in the prompt, set to empty string \"\"",
-  "features": ["3 short labels, max 3 words each"],
-  "cta": "short action text, max 5 words",
-  "scene": "what the visual should show (e.g. 3D laptop and phone showing a modern website)",
+  "headline": "4-6 words, faithful to the user's topic and tone (e.g. 'Celebrate 3 Years of Innovation')",
+  "badge_text": "A punchy 2-4 word highlight ribbon banner. NEVER output 'EXCLUSIVE OFFER' for events, celebrations, or milestones! For events/celebrations, use an occasion tag (e.g. '3RD ANNIVERSARY', 'ANNIVERSARY CELEBRATION', 'CORDIALLY INVITED', 'SPECIAL GALA'). For discounts or pricing, use the exact amount (e.g. 'JUST ₹9,999' or '25% OFF').",
+  "price_text": "same as badge_text for compatibility",
+  "date_text": "exact date, day of week, or timing if mentioned in the prompt (e.g. 'THURSDAY, 22ND OCTOBER', 'THIS SATURDAY', 'VALID TILL 25TH OCT'). If NO date or day is mentioned in the prompt, set to empty string \"\"",
+  "venue_text": "exact venue name, hotel, hall, address, or location if mentioned in the prompt (e.g. 'Taj Hotel', 'Grand Ballroom', 'Mumbai'). If NO venue or location is mentioned, set to empty string \"\"",
+  "features": ["3 distinct short labels, max 3 words each"],
+  "cta": "short action text, max 4 words (e.g. 'RSVP NOW →', 'JOIN THE CELEBRATION →', 'GET STARTED TODAY →')",
+  "scene": "detailed description of the visual backdrop matching the exact prompt theme and occasion",
   "layout": "one of: left-text-right-visual | centered-hero | bottom-banner",
   "style_notes": "colors and mood from the brand kit"
 }
 
 Rules:
-- IMPORTANT FOR DATES & DAYS: If the user prompt mentions any day of week (e.g. Saturday, Sunday, weekend), specific date (e.g. 25th October, Oct 25), or deadline/duration (e.g. 'on Saturday', 'this Friday', 'valid till tomorrow'), you MUST extract it and put it in "date_text" as clean uppercase text (e.g. "THIS SATURDAY ONLY", "EVERY SATURDAY", "VALID TILL 25TH OCT", "THIS WEEKEND"). If no date or day is mentioned, set "date_text" to "".
-- NEVER invent prices, discounts, dates, claims or contact details. Use only what the user and the brand kit provide.
-- If no price is mentioned in the prompt, set "price_text" to "EXCLUSIVE OFFER".
-- If no CTA is mentioned, write a short high-converting CTA matching the topic (e.g. "LET'S BUILD YOUR WEBSITE →").
-- Set "layout" to "${opts.layout || "left-text-right-visual"}".`;
+- IMPORTANT FOR VENUE & LOCATION: If the user prompt mentions a venue, hotel, ballroom, restaurant, address, or city (e.g. 'at Taj Hotel', 'Taj Hotel', 'at Marriott', 'in Mumbai'), you MUST extract the exact venue name into 'venue_text' (e.g. 'Taj Hotel'). In addition, ONE of the 3 'features' MUST be the exact venue (e.g. 'Taj Hotel') so it appears clearly with an icon on the flyer!
+- IMPORTANT FOR DATES & DAYS: If the user prompt mentions any day of week (e.g. Thursday, Friday) or date (e.g. 22 Oct, 22nd October), extract it into 'date_text' formatted cleanly in uppercase (e.g. 'THURSDAY, 22ND OCTOBER').
+- IMPORTANT FOR BADGE:
+  * For celebrations, milestones, anniversaries, parties, galas: NEVER output 'EXCLUSIVE OFFER'. Instead use celebration tags like '3RD ANNIVERSARY', 'ANNIVERSARY CELEBRATION', 'CORDIALLY INVITED', or 'JOIN US'.
+  * For sales/promotions: use the exact price or offer (e.g. 'JUST ₹9,999', '20% OFF').
+- THREE FEATURES: The 3 feature labels MUST be relevant to the user's prompt:
+  * If venue is mentioned: include the venue as a feature (e.g. 'Taj Hotel').
+  * If anniversary/milestone: include milestone (e.g. '3-Year Milestone').
+  * Hospitality or detail: e.g. 'Welcome All', 'Cocktails & Dinner', 'RSVP Required'.
+  * NEVER output generic website/tech features ('Mobile Responsive', 'Custom Design') for an event or celebration!
+- SCENE VISUAL: For corporate anniversaries or celebrations, describe a luxury hotel banquet/ballroom with elegant ambient lighting, champagne flutes, modern luxury decor, and well-dressed professionals celebrating.
+- Set 'layout' to '${opts.layout || "left-text-right-visual"}'.`;
 
   const userPrompt = `User Offer Prompt: "${opts.prompt}"
 Business Name: "${brandName}"
@@ -142,15 +154,24 @@ Style: "${opts.style || "Bold"}"`;
         if (content) {
           const parsed = JSON.parse(content);
           const rawDate = typeof parsed.date_text === "string" ? parsed.date_text.trim() : "";
+          const rawVenue = typeof parsed.venue_text === "string" ? parsed.venue_text.trim() : "";
+          const rawBadge = typeof parsed.badge_text === "string"
+            ? parsed.badge_text.trim()
+            : typeof parsed.price_text === "string"
+            ? parsed.price_text.trim()
+            : "";
+
           return {
-            headline: String(parsed.headline || "Transform Your Business Today").trim(),
-            price_text: String(parsed.price_text || "SPECIAL OFFER").trim(),
+            headline: String(parsed.headline || "Celebrate With Us").trim(),
+            badge_text: rawBadge || "SPECIAL INVITATION",
+            price_text: rawBadge || "SPECIAL INVITATION",
             date_text: rawDate,
+            venue_text: rawVenue,
             features: Array.isArray(parsed.features) && parsed.features.length >= 3
               ? parsed.features.slice(0, 3).map((f: any) => String(f).trim())
-              : ["Custom Design", "Mobile Responsive", "Built to Grow"],
-            cta: String(parsed.cta || "GET STARTED TODAY →").trim(),
-            scene: String(parsed.scene || "3D laptop and smartphone mockups showing modern responsive website on a sleek minimalist desk").trim(),
+              : [rawVenue || "Taj Hotel", "Anniversary Celebration", "Join Us"],
+            cta: String(parsed.cta || "RSVP NOW →").trim(),
+            scene: String(parsed.scene || "Elegant luxury hotel lounge with warm ambient lighting, champagne glasses, and well-dressed professionals celebrating").trim(),
             layout: (["left-text-right-visual", "centered-hero", "bottom-banner"].includes(parsed.layout)
               ? parsed.layout
               : (opts.layout || "left-text-right-visual")) as any,
@@ -166,16 +187,34 @@ Style: "${opts.style || "Bold"}"`;
   // Fallback brief if OpenAI is not available
   const dayMatch = opts.prompt.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend|today|tomorrow)\b/i);
   const dateMatch = opts.prompt.match(/\b(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?)\b/i);
-  const fallbackDate = dayMatch ? `THIS ${dayMatch[0].toUpperCase()}` : (dateMatch ? dateMatch[0].toUpperCase() : "");
+  const fallbackDate = (dayMatch && dateMatch)
+    ? `${dayMatch[0].toUpperCase()}, ${dateMatch[0].toUpperCase()}`
+    : (dayMatch ? `THIS ${dayMatch[0].toUpperCase()}` : (dateMatch ? dateMatch[0].toUpperCase() : ""));
+
+  const venueMatch = opts.prompt.match(/\b(?:at|in|venue:?)\s+([A-Za-z0-9\s&'-]+(?:\bhotel|\bresort|\bhall|\bcenter|\bcentre|\bpalace|\bclub|\barena|\bgarden|\binn|\bbistro|\bcafe|\brestaurant))\b/i)
+    || opts.prompt.match(/\b(?:taj hotel|marriott|hyatt|hilton|radisson|leela|oberoi|itc|novotel|westin)\b/i);
+  const fallbackVenue = venueMatch ? (venueMatch[1] || venueMatch[0]).trim() : "";
+
+  const isCelebration = /\b(celebrat|anniversary|milestone|party|gala|years?|birthday|ceremony|opening|launch|welcome|invited)\b/i.test(opts.prompt);
 
   const priceMatch = opts.prompt.match(/(?:₹|Rs\.?|INR|\$|€|£)?\s*\d[\d,.]*/i);
+  const fallbackBadge = priceMatch
+    ? `JUST ${priceMatch[0].trim()}`
+    : (isCelebration ? "3RD ANNIVERSARY" : "EXCLUSIVE OFFER");
+
   return {
-    headline: "Launch Your Dream Website",
-    price_text: priceMatch ? `JUST ${priceMatch[0].trim()}` : "EXCLUSIVE OFFER",
+    headline: isCelebration ? "Celebrate 3 Years of Innovation" : "Launch Your Dream Website",
+    badge_text: fallbackBadge,
+    price_text: fallbackBadge,
     date_text: fallbackDate,
-    features: ["Custom Design", "Mobile Responsive", "Built to Grow"],
-    cta: "LET'S BUILD YOUR WEBSITE →",
-    scene: "3D laptop and smartphone mockups showing a modern responsive website on a clean minimalist desk",
+    venue_text: fallbackVenue,
+    features: isCelebration
+      ? ["3-Year Milestone", fallbackVenue || "Taj Hotel", "Cordially Invited"]
+      : ["Custom Design", "Mobile Responsive", "Built to Grow"],
+    cta: isCelebration ? "RSVP NOW →" : "LET'S BUILD YOUR WEBSITE →",
+    scene: isCelebration
+      ? "Luxury hotel ballroom with ambient lighting, champagne flutes, elegant cocktail tables, and well-dressed business professionals celebrating"
+      : "3D laptop and smartphone mockups showing a modern responsive website on a clean minimalist desk",
     layout: opts.layout || "left-text-right-visual",
     style_notes: `${brandColors}, clean commercial aesthetic`,
   };
@@ -210,19 +249,33 @@ export async function generateFinishedFlyer(opts: {
     ? opts.colors.join(", ")
     : "teal, navy blue, clean white";
 
-  const f1 = opts.brief.features[0] || "Custom Design";
-  const f2 = opts.brief.features[1] || "Mobile Responsive";
-  const f3 = opts.brief.features[2] || "Built to Grow";
+  const f1 = opts.brief.features[0] || "Anniversary Celebration";
+  const f2 = opts.brief.features[1] || (opts.brief.venue_text ? `Venue: ${opts.brief.venue_text}` : "Taj Hotel");
+  const f3 = opts.brief.features[2] || "Join Us";
 
   const topLogoInstruction = opts.logoUrl
     ? `Top: the supplied logo, unchanged, with the tagline '${opts.tagline || ""}'`
     : `Top: the brand name '${opts.businessName.toUpperCase()}', with the tagline '${opts.tagline || ""}'`;
 
   const dateInstruction = opts.brief.date_text && opts.brief.date_text.trim()
-    ? `Prominent date or timing badge/ribbon: '${opts.brief.date_text.trim()}'. `
+    ? `Prominent date/timing badge or ribbon: '${opts.brief.date_text.trim()}'. `
     : "";
 
-  const prompt = `Design a complete, ready-to-post Instagram flyer, ${size}. Professional commercial ad design, clean modern layout (${opts.brief.layout}), brand colors ${colorsStr}, mood ${opts.brief.style_notes}. ${topLogoInstruction}. Large bold headline: '${opts.brief.headline}'. ${dateInstruction}Prominent price banner: '${opts.brief.price_text}'. Three feature items with simple icons: '${f1}', '${f2}', '${f3}'. Call-to-action button: '${opts.brief.cta}'. Visual: ${opts.brief.scene}. Render ONLY the quoted text exactly as written, with correct spelling. Do not add any other words, numbers, watermarks or fake brand names. Leave comfortable margins so nothing is cropped.`.trim();
+  const venueInstruction = opts.brief.venue_text && opts.brief.venue_text.trim()
+    ? `Prominent venue badge or location pill: 'Venue: ${opts.brief.venue_text.trim()}'. `
+    : "";
+
+  const rawBadge = (opts.brief.badge_text || opts.brief.price_text || "").trim();
+  const isCelebration = /celebrat|anniversary|milestone|gala|years?|invite|hotel/i.test(`${opts.brief.headline} ${opts.brief.scene}`);
+  const effectiveBadge = (isCelebration && rawBadge.toUpperCase() === "EXCLUSIVE OFFER")
+    ? "ANNIVERSARY CELEBRATION"
+    : rawBadge;
+
+  const badgeInstruction = effectiveBadge
+    ? `Prominent highlight banner/ribbon: '${effectiveBadge}'. `
+    : "";
+
+  const prompt = `Design a complete, ready-to-post Instagram flyer, ${size}. Professional commercial ad design, clean modern layout (${opts.brief.layout}), brand colors ${colorsStr}, mood ${opts.brief.style_notes}. ${topLogoInstruction}. Large bold headline: '${opts.brief.headline}'. ${dateInstruction}${venueInstruction}${badgeInstruction}Three highlight feature badges with simple icons: '${f1}', '${f2}', '${f3}'. Call-to-action button: '${opts.brief.cta}'. Visual background: ${opts.brief.scene}. Render ONLY the quoted text exactly as written, with correct spelling. Do not add any other words, numbers, watermarks or fake brand names. Leave comfortable margins so nothing is cropped.`.trim();
 
   log.ai("OpenAI", `Generating finished commercial flyer with ${model}`, { model, size, quality, hasLogo: Boolean(opts.logoUrl) });
 
@@ -726,8 +779,9 @@ export const generatePosters = createServerFn({ method: "POST" })
           theme: ["tomato", "olive", "mustard", "plum"][i % 4]!,
           eyebrow: businessName.toUpperCase(),
           headline: brief.headline,
-          price: brief.price_text,
+          price: brief.badge_text || brief.price_text,
           date_text: brief.date_text || undefined,
+          venue_text: brief.venue_text || undefined,
           footer: tagline || "IDEAS INTO SCALABLE PRODUCTS",
           imageUrl: flyerUrl,
           brief,
