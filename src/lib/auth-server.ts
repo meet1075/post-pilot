@@ -41,6 +41,7 @@ syncEnv();
 
 let _auth: any = null;
 let _cachedDbUrl = "";
+let _cachedBaseUrl = "";
 let _cachedGoogleClientId = "";
 let _activePool: Pool | null = null;
 
@@ -48,19 +49,41 @@ export function getActivePool(): Pool | null {
   return _activePool;
 }
 
+function resolveBaseUrl(request?: Request): string {
+  // Highest priority: Explicit environment variable
+  const envUrl = process.env["BETTER_AUTH_URL"] || process.env["PUBLIC_APP_URL"];
+  if (envUrl && envUrl.trim() !== "") {
+    let clean = envUrl.trim().replace(/\/+$/, "");
+    if (!clean.includes("localhost") && !clean.includes("127.0.0.1") && clean.startsWith("http://")) {
+      clean = clean.replace("http://", "https://");
+    }
+    return clean;
+  }
+
+  // Second priority: Incoming request headers
+  if (request) {
+    const forwardedHost = request.headers.get("x-forwarded-host") || request.headers.get("host");
+    if (forwardedHost) {
+      const isLocal = forwardedHost.includes("localhost") || forwardedHost.includes("127.0.0.1");
+      const proto = isLocal ? (request.headers.get("x-forwarded-proto") || "http") : "https";
+      return `${proto}://${forwardedHost}`.replace(/\/+$/, "");
+    }
+    try {
+      const url = new URL(request.url);
+      const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+      const proto = isLocal ? url.protocol.replace(":", "") : "https";
+      return `${proto}://${url.host}`.replace(/\/+$/, "");
+    } catch {}
+  }
+
+  return "https://post-pilot-red.vercel.app";
+}
+
 export function getAuth(envObj?: unknown, request?: Request): any {
   syncEnv(envObj);
 
-  let rawBaseUrl = process.env["BETTER_AUTH_URL"] ?? process.env["PUBLIC_APP_URL"] ?? "http://localhost:8080";
-  let requestOrigin = "";
-  if (request) {
-    try {
-      requestOrigin = new URL(request.url).origin;
-      rawBaseUrl = requestOrigin;
-    } catch {}
-  }
-  // Always strip trailing slashes to prevent double slashes in OAuth callback URLs (e.g. "//api/auth/callback/google")
-  const cleanBaseUrl = rawBaseUrl.replace(/\/+$/, "");
+  const cleanBaseUrl = resolveBaseUrl(request);
+  const redirectURI = `${cleanBaseUrl}/api/auth/callback/google`;
 
   // Strip channel_binding=require as Neon serverless HTTP transport does not use SCRAM channel binding
   const rawDbUrl = process.env["DATABASE_URL"] || "";
@@ -74,11 +97,14 @@ export function getAuth(envObj?: unknown, request?: Request): any {
     !_auth ||
     isPoolDead ||
     _cachedDbUrl !== databaseUrl ||
+    _cachedBaseUrl !== cleanBaseUrl ||
     (_cachedGoogleClientId === "" && googleClientId !== "");
 
   if (needsReinit && databaseUrl !== "") {
     _cachedDbUrl = databaseUrl;
+    _cachedBaseUrl = cleanBaseUrl;
     _cachedGoogleClientId = googleClientId;
+    console.log(`[Better-Auth Init] baseURL=${cleanBaseUrl}, redirectURI=${redirectURI}`);
     _activePool = new Pool({
       connectionString: databaseUrl,
     });
@@ -88,7 +114,6 @@ export function getAuth(envObj?: unknown, request?: Request): any {
       trustedOrigins: Array.from(
         new Set([
           cleanBaseUrl,
-          requestOrigin,
           "https://post-pilot-red.vercel.app",
           "https://post-pilot.meetsoni1075.workers.dev",
           "http://localhost:8080",
@@ -100,6 +125,7 @@ export function getAuth(envObj?: unknown, request?: Request): any {
         google: {
           clientId: googleClientId,
           clientSecret: googleClientSecret,
+          redirectURI,
         },
       },
       session: {
