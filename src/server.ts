@@ -2,7 +2,7 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
-import { auth, getAuth, getActivePool } from "./lib/auth-server";
+import { auth, getAuth } from "./lib/auth-server";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -97,14 +97,6 @@ export default {
         try {
           const authInstance = getAuth(cfEnv, request);
           const response = await authInstance.handler(request);
-          const currentPool = getActivePool();
-          if (currentPool) {
-            const waitUntil = (ctx as any)?.waitUntil ?? (request as any)?.waitUntil;
-            if (typeof waitUntil === "function") {
-              waitUntil(currentPool.end().catch(() => {}));
-            }
-          }
-
           // Merge CORS headers so browser Network tab can inspect all responses
           const newHeaders = new Headers(response.headers);
           for (const [k, v] of Object.entries(corsHeaders)) {
@@ -118,14 +110,6 @@ export default {
           });
         } catch (authError) {
           console.error("[Better-Auth Handler Exception]", authError);
-          const currentPool = getActivePool();
-          if (currentPool) {
-            const waitUntil = (ctx as any)?.waitUntil ?? (request as any)?.waitUntil;
-            if (typeof waitUntil === "function") {
-              waitUntil(currentPool.end().catch(() => {}));
-            }
-          }
-
           const status =
             typeof (authError as any)?.statusCode === "number"
               ? (authError as any).statusCode
@@ -169,13 +153,6 @@ export default {
 
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      const currentPool = getActivePool();
-      if (currentPool) {
-        const waitUntil = (ctx as any)?.waitUntil ?? (request as any)?.waitUntil;
-        if (typeof waitUntil === "function") {
-          waitUntil(currentPool.end().catch(() => {}));
-        }
-      }
       return await normalizeCatastrophicSsrResponse(response);
     } catch (error) {
       console.error(error);

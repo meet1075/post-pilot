@@ -41,6 +41,7 @@ syncEnv();
 
 let _auth: any = null;
 let _cachedDbUrl = "";
+let _cachedGoogleClientId = "";
 let _activePool: Pool | null = null;
 
 export function getActivePool(): Pool | null {
@@ -61,15 +62,25 @@ export function getAuth(envObj?: unknown, request?: Request): any {
   // Always strip trailing slashes to prevent double slashes in OAuth callback URLs (e.g. "//api/auth/callback/google")
   const cleanBaseUrl = rawBaseUrl.replace(/\/+$/, "");
 
-  const databaseUrl = process.env["DATABASE_URL"] || "";
+  // Strip channel_binding=require as Neon serverless HTTP transport does not use SCRAM channel binding
+  const rawDbUrl = process.env["DATABASE_URL"] || "";
+  const databaseUrl = rawDbUrl.replace(/([?&])channel_binding=[^&]+(&|$)/, "$1").replace(/[?&]$/, "");
 
-  if (!_auth || (_cachedDbUrl !== databaseUrl && databaseUrl !== "")) {
+  const googleClientId = process.env["GOOGLE_CLIENT_ID"] ?? "";
+  const googleClientSecret = process.env["GOOGLE_CLIENT_SECRET"] ?? "";
+
+  const isPoolDead = !_activePool || Boolean((_activePool as any).ended) || Boolean((_activePool as any).ending);
+  const needsReinit =
+    !_auth ||
+    isPoolDead ||
+    _cachedDbUrl !== databaseUrl ||
+    (_cachedGoogleClientId === "" && googleClientId !== "");
+
+  if (needsReinit && databaseUrl !== "") {
     _cachedDbUrl = databaseUrl;
+    _cachedGoogleClientId = googleClientId;
     _activePool = new Pool({
       connectionString: databaseUrl,
-      max: 1,
-      idleTimeoutMillis: 100,
-      maxUses: 1,
     });
     _auth = betterAuth({
       database: _activePool,
@@ -86,8 +97,8 @@ export function getAuth(envObj?: unknown, request?: Request): any {
       secret: process.env["BETTER_AUTH_SECRET"] ?? process.env["JWT_SECRET"] ?? "postpilot-auth-secret-key-32charsmin",
       socialProviders: {
         google: {
-          clientId: process.env["GOOGLE_CLIENT_ID"] ?? "",
-          clientSecret: process.env["GOOGLE_CLIENT_SECRET"] ?? "",
+          clientId: googleClientId,
+          clientSecret: googleClientSecret,
         },
       },
       session: {
