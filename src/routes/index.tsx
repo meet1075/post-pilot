@@ -503,7 +503,11 @@ function PostPilot() {
     try {
       toast.info("Connecting Instagram account...");
       const res = await getZernioConnectUrl({
-        data: { platform: "Instagram", businessId: bizId },
+        data: {
+          platform: "Instagram",
+          businessId: bizId,
+          origin: typeof window !== "undefined" ? window.location.origin : undefined,
+        },
       });
       const url = (res as any)?.data?.url ?? (res as any)?.url;
       if (url) {
@@ -3600,7 +3604,11 @@ function Accounts({
         return;
       }
       const res = await getZernioConnectUrl({
-        data: { platform: selectedPlatform, businessId: activeBusinessId },
+        data: {
+          platform: selectedPlatform,
+          businessId: activeBusinessId,
+          origin: typeof window !== "undefined" ? window.location.origin : undefined,
+        },
       });
       const url = (res as any)?.data?.url ?? (res as any)?.url;
       if (url) {

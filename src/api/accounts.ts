@@ -12,6 +12,7 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { requireAuth, assertUserOwnsBusiness, signOAuthState, verifyOAuthState } from "../lib/auth.js";
 import { query, queryOne } from "../lib/db.js";
 import { checkRateLimit, getClientIp } from "../lib/rateLimit.js";
@@ -113,7 +114,7 @@ export const getAccounts = createServerFn({ method: "GET" })
 // ─── getZernioConnectUrl ──────────────────────────────────────────────────────
 
 export const getZernioConnectUrl = createServerFn({ method: "GET" })
-  .validator((d?: { platform?: string; businessId?: string }) => d)
+  .validator((d?: { platform?: string | undefined; businessId?: string | undefined; origin?: string | undefined } | undefined) => d)
   .handler(async ({ data }) => {
     try {
       const session = await requireAuth();
@@ -130,7 +131,34 @@ export const getZernioConnectUrl = createServerFn({ method: "GET" })
       const zernioKey = process.env["ZERNIO_API_KEY"];
       if (!zernioKey) throw new ValidationError("ZERNIO_API_KEY is not configured");
 
-      const appUrl = process.env["PUBLIC_APP_URL"] ?? "http://localhost:8080";
+      // Dynamically resolve appUrl so production Vercel redirects back to Vercel, not localhost
+      let appUrl = data?.origin?.trim() || "";
+      if (!appUrl) {
+        try {
+          const req = getRequest();
+          const originHeader = req?.headers.get("origin") || req?.headers.get("referer");
+          const forwardedHost = req?.headers.get("x-forwarded-host") || req?.headers.get("host");
+          const proto = req?.headers.get("x-forwarded-proto") || (forwardedHost?.includes("localhost") ? "http" : "https");
+
+          if (originHeader && !originHeader.includes("localhost") && !originHeader.includes("127.0.0.1")) {
+            const parsed = new URL(originHeader);
+            appUrl = `${parsed.protocol}//${parsed.host}`;
+          } else if (forwardedHost && !forwardedHost.includes("localhost") && !forwardedHost.includes("127.0.0.1")) {
+            appUrl = `${proto}://${forwardedHost}`;
+          } else if (process.env["VERCEL_URL"]) {
+            appUrl = `https://${process.env["VERCEL_URL"]}`;
+          } else if (process.env["PUBLIC_APP_URL"]) {
+            appUrl = process.env["PUBLIC_APP_URL"];
+          }
+        } catch {
+          appUrl = process.env["PUBLIC_APP_URL"] ?? "http://localhost:8080";
+        }
+      }
+      if (!appUrl) {
+        appUrl = "https://post-pilot-red.vercel.app";
+      }
+      appUrl = appUrl.replace(/\/+$/, "");
+
       const zernio = new Zernio({ apiKey: zernioKey });
 
       // Ensure business has an isolated Zernio profile
@@ -275,26 +303,49 @@ export const connectAccount = createServerFn({ method: "POST" })
         );
       }
 
-      // Upsert into social_accounts
-      const [account] = await query<SocialAccountItem>`
-        INSERT INTO social_accounts (
-          business_id, platform, external_account_id, username, status, connected_at
-        )
-        VALUES (
-          ${business.id},
-          ${platformNormalized},
-          ${d.zernio_account_id},
-          ${cleanUsername},
-          'connected',
-          now()
-        )
-        ON CONFLICT (business_id, platform, external_account_id) DO UPDATE SET
-          username     = EXCLUDED.username,
-          status       = 'connected',
-          connected_at = now(),
-          deleted_at   = NULL
-        RETURNING id, business_id, platform, external_account_id, username, status, connected_at, updated_at
+      // Upsert into social_accounts (find existing or insert)
+      const existingAccount = await queryOne<SocialAccountItem>`
+        SELECT id, business_id, platform, external_account_id, username, status, connected_at, updated_at
+        FROM social_accounts
+        WHERE business_id = ${business.id}
+          AND LOWER(platform) = ${platformNormalized}
+          AND external_account_id = ${d.zernio_account_id}
+        LIMIT 1
       `;
+
+      let account: SocialAccountItem;
+      if (existingAccount) {
+        const rows = await query<SocialAccountItem>`
+          UPDATE social_accounts
+          SET
+            username     = ${cleanUsername},
+            status       = 'connected',
+            connected_at = now(),
+            deleted_at   = NULL,
+            updated_at   = now()
+          WHERE id = ${existingAccount.id}
+          RETURNING id, business_id, platform, external_account_id, username, status, connected_at, updated_at
+        `;
+        if (!rows[0]) throw new Error("Failed to update social account");
+        account = rows[0];
+      } else {
+        const rows = await query<SocialAccountItem>`
+          INSERT INTO social_accounts (
+            business_id, platform, external_account_id, username, status, connected_at
+          )
+          VALUES (
+            ${business.id},
+            ${platformNormalized},
+            ${d.zernio_account_id},
+            ${cleanUsername},
+            'connected',
+            now()
+          )
+          RETURNING id, business_id, platform, external_account_id, username, status, connected_at, updated_at
+        `;
+        if (!rows[0]) throw new Error("Failed to insert social account");
+        account = rows[0];
+      }
 
       // Legacy sync to connected_accounts
       try {
