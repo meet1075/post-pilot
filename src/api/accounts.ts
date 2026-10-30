@@ -275,26 +275,49 @@ export const connectAccount = createServerFn({ method: "POST" })
         );
       }
 
-      // Upsert into social_accounts
-      const [account] = await query<SocialAccountItem>`
-        INSERT INTO social_accounts (
-          business_id, platform, external_account_id, username, status, connected_at
-        )
-        VALUES (
-          ${business.id},
-          ${platformNormalized},
-          ${d.zernio_account_id},
-          ${cleanUsername},
-          'connected',
-          now()
-        )
-        ON CONFLICT (business_id, platform, external_account_id) DO UPDATE SET
-          username     = EXCLUDED.username,
-          status       = 'connected',
-          connected_at = now(),
-          deleted_at   = NULL
-        RETURNING id, business_id, platform, external_account_id, username, status, connected_at, updated_at
+      // Upsert into social_accounts (find existing or insert)
+      const existingAccount = await queryOne<SocialAccountItem>`
+        SELECT id, business_id, platform, external_account_id, username, status, connected_at, updated_at
+        FROM social_accounts
+        WHERE business_id = ${business.id}
+          AND LOWER(platform) = ${platformNormalized}
+          AND external_account_id = ${d.zernio_account_id}
+        LIMIT 1
       `;
+
+      let account: SocialAccountItem;
+      if (existingAccount) {
+        const rows = await query<SocialAccountItem>`
+          UPDATE social_accounts
+          SET
+            username     = ${cleanUsername},
+            status       = 'connected',
+            connected_at = now(),
+            deleted_at   = NULL,
+            updated_at   = now()
+          WHERE id = ${existingAccount.id}
+          RETURNING id, business_id, platform, external_account_id, username, status, connected_at, updated_at
+        `;
+        if (!rows[0]) throw new Error("Failed to update social account");
+        account = rows[0];
+      } else {
+        const rows = await query<SocialAccountItem>`
+          INSERT INTO social_accounts (
+            business_id, platform, external_account_id, username, status, connected_at
+          )
+          VALUES (
+            ${business.id},
+            ${platformNormalized},
+            ${d.zernio_account_id},
+            ${cleanUsername},
+            'connected',
+            now()
+          )
+          RETURNING id, business_id, platform, external_account_id, username, status, connected_at, updated_at
+        `;
+        if (!rows[0]) throw new Error("Failed to insert social account");
+        account = rows[0];
+      }
 
       // Legacy sync to connected_accounts
       try {
