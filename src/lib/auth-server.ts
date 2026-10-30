@@ -50,18 +50,12 @@ export function getActivePool(): Pool | null {
 }
 
 function resolveBaseUrl(request?: Request): string {
-  // Highest priority: Explicit environment variable
-  const envUrl = process.env["BETTER_AUTH_URL"] || process.env["PUBLIC_APP_URL"];
-  if (envUrl && envUrl.trim() !== "") {
-    let clean = envUrl.trim().replace(/\/+$/, "");
-    if (!clean.includes("localhost") && !clean.includes("127.0.0.1") && clean.startsWith("http://")) {
-      clean = clean.replace("http://", "https://");
-    }
-    return clean;
-  }
-
-  // Second priority: Incoming request headers
+  // 1. If request comes from an active client, prioritize request origin / host headers
   if (request) {
+    const origin = request.headers.get("origin");
+    if (origin && !origin.includes("localhost") && !origin.includes("127.0.0.1")) {
+      return origin.replace(/\/+$/, "");
+    }
     const forwardedHost = request.headers.get("x-forwarded-host") || request.headers.get("host");
     if (forwardedHost) {
       const isLocal = forwardedHost.includes("localhost") || forwardedHost.includes("127.0.0.1");
@@ -74,6 +68,21 @@ function resolveBaseUrl(request?: Request): string {
       const proto = isLocal ? url.protocol.replace(":", "") : "https";
       return `${proto}://${url.host}`.replace(/\/+$/, "");
     } catch {}
+  }
+
+  // 2. Vercel deployment indicator
+  if (process.env["VERCEL_URL"]) {
+    return `https://${process.env["VERCEL_URL"]}`.replace(/\/+$/, "");
+  }
+
+  // 3. Explicit environment variable
+  const envUrl = process.env["BETTER_AUTH_URL"] || process.env["PUBLIC_APP_URL"];
+  if (envUrl && envUrl.trim() !== "") {
+    let clean = envUrl.trim().replace(/\/+$/, "");
+    if (!clean.includes("localhost") && !clean.includes("127.0.0.1") && clean.startsWith("http://")) {
+      clean = clean.replace("http://", "https://");
+    }
+    return clean;
   }
 
   return "https://post-pilot-red.vercel.app";
