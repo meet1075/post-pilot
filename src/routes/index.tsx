@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   ArrowDownToLine,
@@ -42,6 +42,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   generatePosters,
+  editPosterWithAi,
   publishPost,
   suggestCaptions,
   type Platform,
@@ -51,10 +52,18 @@ import {
 } from "@/lib/mockApi";
 import { signIn, signOut, useSession, getSession } from "@/lib/auth-client";
 import { getSession as getServerSession } from "@/api/auth";
-import { getAccounts, connectAccount, disconnectAccount, getZernioConnectUrl } from "@/api/accounts";
+import { getAccounts, connectAccount, disconnectAccount, getZernioConnectUrl, type SocialAccountItem } from "@/api/accounts";
 import { getPosts } from "@/api/posts";
 import { uploadPosterDataUrl } from "@/api/posters";
-import { uploadBrandLogo } from "@/api/brand-kit";
+import { getBrandKit, updateBrandKit, uploadBrandLogo } from "@/api/brand-kit";
+import {
+  listUserBusinesses,
+  getBusiness,
+  createBusiness,
+  updateBusiness,
+  deleteBusiness,
+  type BusinessSummaryItem,
+} from "@/api/businesses";
 import { renderPosterCanvas } from "@/lib/posterCanvas";
 import { REGEX, generatePostersSchema } from "@/lib/validators";
 import { LandingPage } from "@/components/LandingPage";
@@ -177,12 +186,16 @@ const navItems: { name: Page; icon: typeof LayoutGrid }[] = [
 ];
 
 export interface BrandKitData {
+  businessId?: string | undefined;
   businessName: string;
   tagline: string;
   location: string;
   phone: string;
   colors: string[];
   font: string;
+  tone?: string | undefined;
+  timezone?: string | undefined;
+  defaultHashtags?: string | undefined;
   logoName?: string | undefined;
   logoUrl?: string | undefined;
 }
@@ -249,6 +262,35 @@ function PostPilot() {
   const activeUser = session?.user ?? clientUser ?? (loaderData?.initialUser as any);
   const isMeetSoni = activeUser?.email === "meetsoni1075@gmail.com";
 
+  // Multi-business workspace state
+  const [businesses, setBusinesses] = useState<BusinessSummaryItem[]>([]);
+  const [activeBusinessId, setActiveBusinessId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("postpilot_active_business_id") || "";
+    }
+    return "";
+  });
+  const [billingInfo, setBillingInfo] = useState<{ isFreeTier: boolean; notice: string; totalAccounts: number }>({
+    isFreeTier: true,
+    notice: "Free Tier: 2 connected accounts included.",
+    totalAccounts: 0,
+  });
+
+  // Modal dialog states
+  const [addBusinessModalOpen, setAddBusinessModalOpen] = useState(false);
+  const [connectPromptOpen, setConnectPromptOpen] = useState(false);
+  const [connectPromptBiz, setConnectPromptBiz] = useState<{ id: string; name: string } | null>(null);
+
+  // New business form fields
+  const [newBizName, setNewBizName] = useState("");
+  const [newBizTagline, setNewBizTagline] = useState("");
+  const [newBizLogoUrl, setNewBizLogoUrl] = useState("");
+  const [newBizColors, setNewBizColors] = useState<string[]>(["Tomato", "Olive"]);
+  const [newBizTone, setNewBizTone] = useState("Friendly");
+  const [newBizTimezone, setNewBizTimezone] = useState("Asia/Kolkata");
+  const [creatingBusiness, setCreatingBusiness] = useState(false);
+  const [uploadingNewBizLogo, setUploadingNewBizLogo] = useState(false);
+
   // Persistent brand kit state shared across CreateFlow and BrandKit
   const [brandKit, setBrandKit] = useState<BrandKitData>(() => {
     if (typeof window !== "undefined") {
@@ -278,75 +320,202 @@ function PostPilot() {
     });
   };
 
-  // Decoupled account state per Google user (loaded directly from database)
-  const [connectedAccounts, setConnectedAccounts] = useState<{ platform: string; handle: string }[]>([]);
+  // Connected accounts for active business
+  const [connectedAccounts, setConnectedAccounts] = useState<Array<{
+    id?: string;
+    platform: string;
+    handle: string;
+    status?: string;
+    externalAccountId?: string;
+  }>>([]);
 
-  // Keep in sync whenever activeUser changes or DB accounts return
+  // Load and refresh workspace data per active business
+  const refreshWorkspace = async (targetId?: string) => {
+    try {
+      const bizRes = await listUserBusinesses();
+      if (bizRes && "data" in bizRes && bizRes.data) {
+        const list: BusinessSummaryItem[] = bizRes.data.businesses || [];
+        setBusinesses(list);
+
+        const chosenId = targetId || activeBusinessId || localStorage.getItem("postpilot_active_business_id") || bizRes.data.activeBusinessId || list[0]?.id;
+
+        if (chosenId) {
+          setActiveBusinessId(chosenId);
+          try {
+            localStorage.setItem("postpilot_active_business_id", chosenId);
+            document.cookie = `postpilot_active_business=${encodeURIComponent(chosenId)}; path=/; max-age=31536000`;
+          } catch {}
+
+          // Load active business brand kit
+          const bRes = await getBusiness({ data: { businessId: chosenId } });
+          if (bRes?.success && bRes.business) {
+            const b = bRes.business;
+            setBrandKit({
+              businessId: b.id,
+              businessName: b.name,
+              tagline: b.tagline || "",
+              location: b.location || "",
+              phone: b.phone || "",
+              colors: Array.isArray(b.brand_colors) && b.brand_colors.length > 0 ? b.brand_colors : ["Tomato", "Olive"],
+              font: "Fraunces",
+              tone: b.tone || "Friendly",
+              timezone: b.timezone || "UTC",
+              defaultHashtags: b.default_hashtags || "",
+              logoUrl: b.logo_url || undefined,
+            });
+          }
+
+          // Load accounts for this business
+          const accRes = await getAccounts({ data: { businessId: chosenId } });
+          if (accRes && "data" in accRes && accRes.data) {
+            const accs = accRes.data.accounts;
+            if (Array.isArray(accs)) {
+              const mapped = accs
+                .filter((a: any) => a.status === "connected")
+                .map((a: any) => ({
+                  id: a.id,
+                  platform: a.platform,
+                  handle: a.username || a.platform_handle || "Connected",
+                  status: a.status,
+                  externalAccountId: a.external_account_id,
+                }));
+              setConnectedAccounts(mapped);
+            }
+            if (accRes.data.billing) {
+              setBillingInfo({
+                isFreeTier: accRes.data.billing.isFreeTier,
+                notice: accRes.data.billing.notice,
+                totalAccounts: (accRes.data.billing as any).totalAccounts ?? (accRes.data.totalConnectedAccounts ?? 0),
+              });
+            }
+          }
+
+          // Load posts for this business
+          setLoadingPosts(true);
+          const postsRes = await getPosts({ data: { businessId: chosenId } });
+          if (postsRes && "data" in postsRes && postsRes.data) {
+            const rawPosts = postsRes.data.posts;
+            if (Array.isArray(rawPosts)) {
+              const mapped: SocialPost[] = rawPosts.map((p: any) => {
+                let dateStr = "";
+                if (p.date) {
+                  dateStr = typeof p.date === "string" ? p.date.slice(0, 10) : new Date(p.date).toISOString().slice(0, 10);
+                }
+                return {
+                  id: p.id,
+                  businessId: p.business_id,
+                  socialAccountId: p.social_account_id ?? undefined,
+                  headline: p.headline,
+                  caption: p.caption,
+                  date: dateStr,
+                  time: p.time ? String(p.time).slice(0, 5) : "",
+                  status: (p.status === "Failed" ? "Draft" : p.status) as PostStatus,
+                  platform: p.platform as Platform,
+                  theme: p.theme || "tomato",
+                  price: p.price || "",
+                  imageUrl: p.image_url ?? undefined,
+                };
+              });
+              setPosts(mapped);
+              try {
+                localStorage.setItem("postpilot_cached_posts", JSON.stringify(mapped));
+              } catch {}
+            }
+          }
+          setLoadingPosts(false);
+        }
+      }
+    } catch (err) {
+      console.error("[refreshWorkspace Error]", err);
+      setLoadingPosts(false);
+    }
+  };
+
+  // Keep in sync whenever activeUser changes
   useEffect(() => {
     if (!activeUser) return;
-
-    setBusinessName(activeUser.name ? `${activeUser.name}'s Workspace` : "My Workspace");
-
-    getAccounts()
-      .then((res: any) => {
-        if (res && (res.status === "success" || res.success)) {
-          const biz = res.data?.businessName ?? res.businessName;
-          const accs = res.data?.accounts ?? res.accounts;
-          if (biz) {
-            setBusinessName(biz);
-          }
-          if (Array.isArray(accs)) {
-            const mapped = accs
-              .filter((a: any) => a.status === "connected")
-              .map((a: any) => ({
-                platform: a.platform,
-                handle: a.platform_handle || a.platform || "Connected",
-              }));
-            setConnectedAccounts(mapped);
-          }
-        }
-      })
-      .catch((err) => {
-        console.error("Failed to load accounts:", err);
-      });
-
-    // Load persisted posts from database
-    getPosts()
-      .then((res: any) => {
-        if (res && (res.status === "success" || res.success)) {
-          const rawPosts = res.data?.posts ?? res.posts;
-          if (Array.isArray(rawPosts)) {
-            const mapped: SocialPost[] = rawPosts.map((p: any) => {
-              let dateStr = "";
-              if (p.date) {
-                dateStr = typeof p.date === "string" ? p.date.slice(0, 10) : new Date(p.date).toISOString().slice(0, 10);
-              }
-              return {
-                id: p.id,
-                headline: p.headline,
-                caption: p.caption,
-                date: dateStr,
-                time: p.time ? String(p.time).slice(0, 5) : "",
-                status: (p.status === "Failed" ? "Draft" : p.status) as PostStatus,
-                platform: p.platform as Platform,
-                theme: p.theme || "tomato",
-                price: p.price || "",
-                imageUrl: p.image_url ?? undefined,
-              };
-            });
-            setPosts(mapped);
-            try {
-              localStorage.setItem("postpilot_cached_posts", JSON.stringify(mapped));
-            } catch {}
-            setLoadingPosts(false);
-          }
-        }
-      })
-      .catch((err) => {
-        console.error("Failed to load posts from DB:", err);
-        setLoadingPosts(false);
-      });
+    refreshWorkspace();
   }, [activeUser?.id, activeUser?.email]);
+
+  const handleSwitchBusiness = async (bizId: string) => {
+    setBusinessMenuOpen(false);
+    const target = businesses.find((b) => b.id === bizId);
+    if (!target) return;
+    toast(`Switching to workspace: ${target.name}...`);
+    await refreshWorkspace(bizId);
+    toast.success(`Active workspace: ${target.name}`);
+  };
+
+  const handleAddBusinessSubmit = async () => {
+    if (!newBizName.trim()) {
+      toast.error("Please enter a business name");
+      return;
+    }
+    setCreatingBusiness(true);
+    try {
+      const res = await createBusiness({
+        data: {
+          name: newBizName.trim(),
+          tagline: newBizTagline.trim(),
+          logo_url: newBizLogoUrl || null,
+          brand_colors: newBizColors,
+          tone: newBizTone as any,
+          timezone: newBizTimezone,
+        },
+      });
+
+      if (res && (res.status === "success" || (res as any).success)) {
+        const createdBiz = (res as any).data?.business || (res as any).business;
+        toast.success(`Workspace "${createdBiz.name}" created!`);
+        setAddBusinessModalOpen(false);
+        setNewBizName("");
+        setNewBizTagline("");
+        setNewBizLogoUrl("");
+        await refreshWorkspace(createdBiz.id);
+        // Prompt user to connect Instagram for this new business
+        setConnectPromptBiz({ id: createdBiz.id, name: createdBiz.name });
+        setConnectPromptOpen(true);
+      } else {
+        toast.error((res as any)?.message || "Failed to create business");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to create business");
+    } finally {
+      setCreatingBusiness(false);
+    }
+  };
+
+  const handleDeleteBusiness = async (bizId: string) => {
+    try {
+      const res = await deleteBusiness({ data: { business_id: bizId } });
+      if (res && (res.status === "success" || (res as any).success)) {
+        toast.success((res as any)?.message || "Business deleted");
+        await refreshWorkspace();
+      } else {
+        toast.error((res as any)?.message || "Could not delete business");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Could not delete business");
+    }
+  };
+
+  const startInstagramOAuthForBiz = async (bizId: string) => {
+    try {
+      toast.info("Connecting Instagram account...");
+      const res = await getZernioConnectUrl({
+        data: { platform: "Instagram", businessId: bizId },
+      });
+      const url = (res as any)?.data?.url ?? (res as any)?.url;
+      if (url) {
+        window.location.href = url;
+        return;
+      }
+      const errMsg = (res as any)?.error?.message || (res as any)?.message || "Could not obtain connect URL from Zernio";
+      toast.error(errMsg);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to initiate Instagram connect");
+    }
+  };
 
   const instagramAccount = connectedAccounts.find(
     (a) => a.platform.toLowerCase() === "instagram"
@@ -413,8 +582,8 @@ function PostPilot() {
             </button>
           </div>
 
-          {/* Business Switcher on md+ to the right of border-r */}
-          <div className="relative hidden sm:flex items-center px-4">
+          {/* Business Switcher in top bar (visible on mobile and desktop) */}
+          <div className="relative flex items-center px-2 sm:px-4">
             <Button
               variant="ghost"
               className="h-9 gap-2 px-2.5 text-sm hover:bg-secondary"
@@ -428,31 +597,66 @@ function PostPilot() {
               ) : (
                 <span className="flex h-6 w-6 items-center justify-center rounded bg-primary/10 text-[11px] font-semibold text-primary">{businessInitial}</span>
               )}
-              <span className="font-medium">{businessName}</span>
+              <span className="font-medium max-w-[140px] truncate">{businessName}</span>
               <span className="rounded border bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">Active</span>
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
             </Button>
             {businessMenuOpen && (
-              <div className="absolute left-4 top-11 z-50 w-64 rounded-lg border bg-popover p-2 shadow-lg">
-                <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">YOUR BUSINESSES</div>
+              <div className="absolute left-2 sm:left-4 top-11 z-50 w-72 rounded-xl border bg-popover p-2 shadow-xl animate-in fade-in-50 zoom-in-95">
+                <div className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                  <span>YOUR WORKSPACES</span>
+                  <span className="text-[10px] text-muted-foreground font-mono">{businesses.length}/10</span>
+                </div>
+                <div className="max-h-56 overflow-y-auto space-y-0.5 py-1">
+                  {businesses.map((biz) => {
+                    const isActive = biz.id === activeBusinessId || biz.name === businessName;
+                    return (
+                      <button
+                        key={biz.id}
+                        type="button"
+                        className={`w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-xs transition-colors ${
+                          isActive ? "bg-secondary font-medium text-foreground" : "hover:bg-secondary/60 text-muted-foreground hover:text-foreground"
+                        }`}
+                        onClick={() => handleSwitchBusiness(biz.id)}
+                      >
+                        <span className="flex items-center gap-2.5 truncate">
+                          {biz.logo_url ? (
+                            <img src={biz.logo_url} alt="" className="h-5 w-5 rounded object-contain border bg-white p-0.5 shrink-0" />
+                          ) : (
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-primary/10 text-[10px] font-bold text-primary">
+                              {biz.name.charAt(0).toUpperCase()}
+                            </span>
+                          )}
+                          <span className="truncate">{biz.name}</span>
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {biz.connected_accounts_count > 0 ? (
+                            <span className="text-[10px] text-olive font-medium flex items-center gap-1">
+                              <Instagram className="h-3 w-3" /> {biz.connected_accounts_count}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground">No accounts</span>
+                          )}
+                          {isActive && <Check className="h-3.5 w-3.5 text-primary ml-1" />}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="border-t my-1" />
                 <Button
                   variant="ghost"
-                  className="w-full justify-between text-xs"
+                  className="w-full justify-start text-xs font-medium text-primary hover:text-primary hover:bg-primary/10 h-8"
                   onClick={() => {
                     setBusinessMenuOpen(false);
-                    toast(`Viewing ${businessName}`);
+                    setAddBusinessModalOpen(true);
                   }}
                 >
-                  <span className="flex items-center gap-2">
-                    <Check className="h-3.5 w-3.5 text-primary" /> {businessName}
-                  </span>
-                  <span className="text-[10px] text-olive font-medium">
-                    {isInstagramConnected ? "Connected" : "Active"}
-                  </span>
+                  <Plus className="mr-2 h-3.5 w-3.5" /> Add business
                 </Button>
                 <Button
                   variant="ghost"
-                  className="w-full justify-start text-xs text-muted-foreground hover:text-foreground"
+                  className="w-full justify-start text-xs text-muted-foreground hover:text-foreground h-8"
                   onClick={() => {
                     setBusinessMenuOpen(false);
                     navigate("Settings");
@@ -710,7 +914,11 @@ function PostPilot() {
               <CreateFlow
                 brandKit={brandKit}
                 businessName={businessName}
-                instagramAccount={instagramAccount}
+                activeBusinessId={activeBusinessId}
+                businesses={businesses}
+                connectedAccounts={connectedAccounts}
+                onSwitchBusiness={handleSwitchBusiness}
+                onOpenAddBusiness={() => setAddBusinessModalOpen(true)}
                 onPublished={(post) => {
                   setPosts((current) => {
                     const updated = [post, ...current];
@@ -743,11 +951,31 @@ function PostPilot() {
             {page === "Brand kit" && (
               <BrandKit
                 data={brandKit}
-                onSave={(updated) => {
+                onSave={async (updated) => {
                   setBrandKit(updated);
                   try {
                     localStorage.setItem("postpilot_brand_kit", JSON.stringify(updated));
                   } catch {}
+                  if (activeBusinessId) {
+                    try {
+                      await updateBusiness({
+                        data: {
+                          business_id: activeBusinessId,
+                          name: updated.businessName,
+                          tagline: updated.tagline,
+                          location: updated.location,
+                          phone: updated.phone,
+                          brand_colors: updated.colors,
+                          logo_url: updated.logoUrl || null,
+                          tone: (updated.tone as any) || "Friendly",
+                          timezone: updated.timezone || "Asia/Kolkata",
+                          default_hashtags: updated.defaultHashtags || null,
+                        },
+                      });
+                    } catch (err: any) {
+                      console.error("Failed to update business in database", err);
+                    }
+                  }
                   toast.success("Brand kit saved & applied across PostPilot");
                 }}
               />
@@ -756,14 +984,25 @@ function PostPilot() {
               <Accounts
                 connectedAccounts={connectedAccounts}
                 businessName={businessName}
+                activeBusinessId={activeBusinessId}
+                businesses={businesses}
+                billingInfo={billingInfo}
                 userEmail={userEmail}
+                onRefresh={() => refreshWorkspace()}
                 onAccountsChange={setConnectedAccounts}
+                onConnect={(bizId) => startInstagramOAuthForBiz(bizId)}
               />
             )}
             {page === "Settings" && (
               <SettingsPage
                 businessName={businessName}
+                activeBusinessId={activeBusinessId}
+                businesses={businesses}
+                brandKit={brandKit}
+                posts={posts}
                 onBusinessNameChange={setBusinessName}
+                onRefresh={() => refreshWorkspace()}
+                onDeleteBusiness={handleDeleteBusiness}
                 isMeetSoni={isMeetSoni}
               />
             )}
@@ -773,6 +1012,244 @@ function PostPilot() {
               isOpen={Boolean(selectedPostForDetail)}
               onClose={() => setSelectedPostForDetail(null)}
             />
+
+            {/* Add Business Modal Dialog */}
+            <Dialog open={addBusinessModalOpen} onOpenChange={setAddBusinessModalOpen}>
+              <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="font-display text-2xl flex items-center gap-2">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <Plus className="h-4 w-4" />
+                    </span>
+                    Add New Business
+                  </DialogTitle>
+                  <DialogDescription>
+                    Create a separate workspace with its own brand identity, tone, and connected Instagram accounts.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4 py-2">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground">Business Name *</label>
+                    <Input
+                      placeholder="e.g. Acme Coffee Roasters"
+                      value={newBizName}
+                      onChange={(e) => setNewBizName(e.target.value)}
+                      className="mt-1"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-foreground">Tagline / Slogan</label>
+                    <Input
+                      placeholder="e.g. Ethically sourced, perfectly roasted."
+                      value={newBizTagline}
+                      onChange={(e) => setNewBizTagline(e.target.value)}
+                      className="mt-1"
+                    />
+                  </div>
+
+                  {/* Logo Upload */}
+                  <div>
+                    <label className="text-xs font-semibold text-foreground">Brand Logo</label>
+                    <div className="mt-1.5 flex items-center gap-3">
+                      {newBizLogoUrl ? (
+                        <div className="relative h-12 w-12 rounded-lg border bg-white p-1 overflow-hidden shrink-0 flex items-center justify-center">
+                          <img src={newBizLogoUrl} alt="Logo preview" className="h-full w-full object-contain" />
+                          <button
+                            type="button"
+                            onClick={() => setNewBizLogoUrl("")}
+                            className="absolute inset-0 bg-black/50 text-white flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex h-12 w-12 items-center justify-center rounded-lg border-2 border-dashed bg-secondary/50 text-muted-foreground shrink-0">
+                          <Upload className="h-4 w-4" />
+                        </div>
+                      )}
+                      <div className="flex-1">
+                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border bg-secondary/60 px-3 py-2 text-xs font-medium hover:bg-secondary">
+                          <Upload className="h-3.5 w-3.5 text-muted-foreground" />
+                          {uploadingNewBizLogo ? "Uploading..." : "Choose logo file"}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="sr-only"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              setUploadingNewBizLogo(true);
+                              const reader = new FileReader();
+                              reader.onload = async () => {
+                                try {
+                                  const dataUrl = reader.result as string;
+                                  setNewBizLogoUrl(dataUrl);
+                                  const res = await uploadBrandLogo({ data: { dataUrl, filename: file.name } });
+                                  if (res?.success && res.publicUrl) {
+                                    setNewBizLogoUrl(res.publicUrl);
+                                    toast.success("Logo uploaded!");
+                                  }
+                                } catch {
+                                  toast.error("Upload failed, using local preview");
+                                } finally {
+                                  setUploadingNewBizLogo(false);
+                                }
+                              };
+                              reader.readAsDataURL(file);
+                            }}
+                          />
+                        </label>
+                        <p className="mt-1 text-[11px] text-muted-foreground">PNG, SVG or JPG. Max 5MB.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Brand Colors */}
+                  <div>
+                    <label className="text-xs font-semibold text-foreground">Brand Colors (Pick 2-3)</label>
+                    <div className="mt-1.5 flex flex-wrap gap-2">
+                      {palette.map((p) => {
+                        const isSelected = newBizColors.includes(p.name);
+                        return (
+                          <button
+                            key={p.name}
+                            type="button"
+                            onClick={() => {
+                              setNewBizColors((prev) =>
+                                prev.includes(p.name)
+                                  ? prev.length > 1
+                                    ? prev.filter((c) => c !== p.name)
+                                    : prev
+                                  : [...prev, p.name].slice(-3)
+                              );
+                            }}
+                            className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-all ${
+                              isSelected
+                                ? "border-primary bg-primary/10 font-medium text-foreground ring-1 ring-primary/40"
+                                : "hover:bg-secondary/60 text-muted-foreground"
+                            }`}
+                          >
+                            <span className={`h-3 w-3 rounded-full ${p.className}`} />
+                            {p.name}
+                            {isSelected && <Check className="h-3 w-3 text-primary ml-0.5" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Tone */}
+                  <div>
+                    <label className="text-xs font-semibold text-foreground">Caption Tone</label>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {["Friendly", "Professional", "Bold", "Playful", "Casual", "Luxury"].map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setNewBizTone(t)}
+                          className={`rounded-lg border px-2.5 py-1 text-xs transition-colors ${
+                            newBizTone === t
+                              ? "border-primary bg-primary text-primary-foreground font-medium"
+                              : "hover:bg-secondary/60 text-muted-foreground"
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Timezone */}
+                  <div>
+                    <label className="text-xs font-semibold text-foreground">Posting Timezone</label>
+                    <select
+                      value={newBizTimezone}
+                      onChange={(e) => setNewBizTimezone(e.target.value)}
+                      className="mt-1 flex h-9 w-full rounded-lg border border-input bg-background px-3 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="Asia/Kolkata">India Standard Time (IST - UTC+5:30)</option>
+                      <option value="America/New_York">Eastern Time (ET - UTC-5/4)</option>
+                      <option value="America/Chicago">Central Time (CT - UTC-6/5)</option>
+                      <option value="America/Los_Angeles">Pacific Time (PT - UTC-8/7)</option>
+                      <option value="Europe/London">London (GMT/BST - UTC+0/1)</option>
+                      <option value="Europe/Stockholm">Central European (CET - UTC+1/2)</option>
+                      <option value="Asia/Dubai">Gulf Standard Time (GST - UTC+4)</option>
+                      <option value="Australia/Sydney">Australian Eastern (AEST - UTC+10/11)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <DialogFooter className="gap-2 sm:gap-0">
+                  <Button variant="outline" onClick={() => setAddBusinessModalOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleAddBusinessSubmit}
+                    disabled={creatingBusiness || !newBizName.trim()}
+                    className="gap-2"
+                  >
+                    {creatingBusiness ? (
+                      <>
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                        Creating Workspace...
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="h-4 w-4" />
+                        Create Business
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Prompt to Connect Instagram Modal Dialog */}
+            <Dialog open={connectPromptOpen} onOpenChange={setConnectPromptOpen}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="font-display text-2xl flex items-center gap-2">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-olive/10 text-olive">
+                      <Instagram className="h-4 w-4" />
+                    </span>
+                    Connect Instagram
+                  </DialogTitle>
+                  <DialogDescription>
+                    Link your Instagram account for <strong>{connectPromptBiz?.name}</strong> to enable one-click publishing and scheduling.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3 py-2 text-xs">
+                  <div className="rounded-lg border bg-secondary/50 p-3 leading-relaxed text-muted-foreground">
+                    <p className="font-medium text-foreground mb-1">Separate Accounts per Business</p>
+                    Each business workspace has its own independent Instagram connection. You can connect different handles to each workspace.
+                  </div>
+                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-[11px] leading-relaxed text-muted-foreground">
+                    <span className="font-semibold text-primary">Zernio Free Tier:</span> First 2 connected accounts across PostPilot are free. Subsequent accounts are billed at $6/month.
+                  </div>
+                </div>
+
+                <DialogFooter className="gap-2 sm:gap-0">
+                  <Button variant="outline" onClick={() => setConnectPromptOpen(false)}>
+                    I'll do this later
+                  </Button>
+                  <Button
+                    className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
+                    onClick={() => {
+                      if (connectPromptBiz) {
+                        setConnectPromptOpen(false);
+                        startInstagramOAuthForBiz(connectPromptBiz.id);
+                      }
+                    }}
+                  >
+                    <Instagram className="h-4 w-4" />
+                    Connect Instagram Now
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </main>
       </div>
@@ -961,6 +1438,7 @@ function Poster({
   imageUrl,
   logoUrl,
   font,
+  format = "Portrait 4:5",
   needsReview = false,
 }: {
   theme: string;
@@ -973,20 +1451,28 @@ function Poster({
   imageUrl?: string | undefined;
   logoUrl?: string | undefined;
   font?: string | undefined;
+  format?: string | undefined;
   needsReview?: boolean | undefined;
 }) {
   const isWorkSans = font?.toLowerCase().includes("work sans");
 
+  const aspectClass = format === "Square"
+    ? "aspect-square"
+    : format === "Story"
+    ? "aspect-[9/16]"
+    : "aspect-[4/5]";
+
   if (imageUrl) {
     return (
       <div
-        className={`poster ${selected ? "ring-2 ring-primary ring-offset-2" : ""} relative overflow-hidden bg-muted group rounded-md shadow-xs aspect-[4/5]`}
+        className={`poster ${selected ? "ring-2 ring-primary ring-offset-2" : ""} relative overflow-hidden bg-muted group rounded-md shadow-xs ${aspectClass}`}
       >
         <img
           src={imageUrl}
           alt={headline || "Finished flyer"}
           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
         />
+
         {needsReview && (
           <div className="absolute top-2 left-2 z-20 flex items-center gap-1 rounded-full bg-amber-500/95 px-2.5 py-1 text-[10px] font-semibold text-white shadow-md backdrop-blur-xs">
             <span>⚠️</span> Needs Review
@@ -998,7 +1484,7 @@ function Poster({
 
   return (
     <div
-      className={`poster poster--${theme} ${selected ? "ring-2 ring-primary ring-offset-2" : ""} relative overflow-hidden flex flex-col justify-between p-5 text-center`}
+      className={`poster poster--${theme} ${selected ? "ring-2 ring-primary ring-offset-2" : ""} relative overflow-hidden flex flex-col justify-between p-5 text-center ${aspectClass}`}
     >
       {logoUrl && (
         <div className="absolute top-2.5 right-2.5 z-20 flex h-7 w-7 items-center justify-center rounded-full bg-white/95 p-1 shadow-md border border-black/10 backdrop-blur-xs">
@@ -1115,19 +1601,47 @@ function PostCard({
 function CreateFlow({
   brandKit,
   businessName,
-  instagramAccount,
+  activeBusinessId,
+  businesses = [],
+  connectedAccounts = [],
+  onSwitchBusiness,
+  onOpenAddBusiness,
   onPublished,
   onCancel,
   onNavigate,
 }: {
   brandKit: BrandKitData;
   businessName: string;
-  instagramAccount?: { platform: string; handle: string } | undefined;
+  activeBusinessId?: string;
+  businesses?: BusinessSummaryItem[];
+  connectedAccounts?: Array<{ id?: string; platform: string; handle: string; status?: string; externalAccountId?: string }>;
+  onSwitchBusiness?: (bizId: string) => void;
+  onOpenAddBusiness?: () => void;
   onPublished: (post: SocialPost) => void;
   onCancel: () => void;
   onNavigate: (page: Page) => void;
 }) {
   const [step, setStep] = useState(1);
+  const [selectedBizId, setSelectedBizId] = useState<string>(() => activeBusinessId || businesses[0]?.id || "");
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(() => {
+    const defaultIg = connectedAccounts.find((a) => a.platform.toLowerCase() === "instagram");
+    return defaultIg?.id || connectedAccounts[0]?.id || "";
+  });
+
+  // Keep in sync with incoming activeBusinessId
+  useEffect(() => {
+    if (activeBusinessId) {
+      setSelectedBizId(activeBusinessId);
+    }
+  }, [activeBusinessId]);
+
+  useEffect(() => {
+    const defaultIg = connectedAccounts.find((a) => a.platform.toLowerCase() === "instagram");
+    if (defaultIg?.id && !selectedAccountId) {
+      setSelectedAccountId(defaultIg.id);
+    }
+  }, [connectedAccounts]);
+
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState("Bold");
   const [format, setFormat] = useState("Portrait 4:5");
@@ -1150,9 +1664,37 @@ function CreateFlow({
   const [publishing, setPublishing] = useState(false);
   const [success, setSuccess] = useState(false);
 
+  // Mid-flow business switch warning
+  const [switchWarnOpen, setSwitchWarnOpen] = useState(false);
+  const [pendingBizId, setPendingBizId] = useState<string | null>(null);
+
+  const handleRequestSwitchBiz = (targetId: string) => {
+    if (targetId === selectedBizId) return;
+    if (step > 1 || options.length > 0) {
+      setPendingBizId(targetId);
+      setSwitchWarnOpen(true);
+    } else {
+      executeBizSwitch(targetId);
+    }
+  };
+
+  const executeBizSwitch = (targetId: string) => {
+    setSelectedBizId(targetId);
+    setOptions([]);
+    setSelected(0);
+    setHeadline("");
+    setPrice("");
+    setCaption("");
+    setSuggestions([]);
+    setStep(1);
+    onSwitchBusiness?.(targetId);
+    setSwitchWarnOpen(false);
+    setPendingBizId(null);
+  };
+
   const currentOption = options[selected];
   const startGeneration = async () => {
-    const parsed = generatePostersSchema.safeParse({ prompt, style });
+    const parsed = generatePostersSchema.safeParse({ prompt, style, format });
     if (!parsed.success) {
       toast.error(parsed.error.issues[0]?.message ?? "Please provide a description for your post");
       return;
@@ -1160,35 +1702,69 @@ function CreateFlow({
     setLoading(true);
     setStep(2);
     try {
-      const results = await generatePosters(prompt, style, useBrand, brandKit, 2);
-      setOptions(results);
-      setSelected(0);
-      setHeadline(results[0]?.headline ?? "");
-      setPrice(results[0]?.price ?? "");
-      const detectedDate = results[0]?.brief?.date_text || results[0]?.date_text;
-      setDateText(detectedDate || new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }).toUpperCase());
+      const results = await generatePosters(
+        prompt,
+        style,
+        useBrand,
+        brandKit,
+        2,
+        format as any,
+        selectedBizId,
+        selectedAccountId
+      );
+      if (Array.isArray(results) && results.length > 0) {
+        setOptions(results);
+        setSelected(0);
+        setHeadline(results[0]?.headline ?? "");
+        setPrice(results[0]?.price ?? "");
+        const detectedDate = results[0]?.brief?.date_text || results[0]?.date_text;
+        setDateText(detectedDate || new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }).toUpperCase());
+      } else {
+        toast.error("Could not load poster options. Please try again.");
+      }
+    } catch (err) {
+      console.error("[startGeneration Error]", err);
+      toast.error("Poster generation failed. Please try again.");
     } finally {
       setLoading(false);
     }
   };
+
   const regenerate = async () => {
     setLoading(true);
     try {
-      const results = await generatePosters(prompt, style, useBrand, brandKit, 2);
-      setOptions(results);
-      setSelected(0);
-      setHeadline(results[0]?.headline ?? "");
-      setPrice(results[0]?.price ?? "");
-      const detectedDate = results[0]?.brief?.date_text || results[0]?.date_text;
-      if (detectedDate) setDateText(detectedDate);
-      toast.success("Two fresh layouts are ready");
+      const results = await generatePosters(
+        prompt,
+        style,
+        useBrand,
+        brandKit,
+        2,
+        format as any,
+        selectedBizId,
+        selectedAccountId
+      );
+      if (Array.isArray(results) && results.length > 0) {
+        setOptions(results);
+        setSelected(0);
+        setHeadline(results[0]?.headline ?? "");
+        setPrice(results[0]?.price ?? "");
+        const detectedDate = results[0]?.brief?.date_text || results[0]?.date_text;
+        if (detectedDate) setDateText(detectedDate);
+        toast.success("Two fresh layouts are ready");
+      } else {
+        toast.error("Could not regenerate poster options.");
+      }
+    } catch (err) {
+      console.error("[regenerate Error]", err);
+      toast.error("Failed to regenerate posters. Please try again.");
     } finally { setLoading(false); }
   };
+
   const loadSuggestions = async () => {
     setOwnCaption(false);
     setSuggesting(true);
     try {
-      const next = await suggestCaptions(headline, price);
+      const next = await suggestCaptions(headline, price, selectedBizId);
       const cleaned = next.map((item) => {
         if (item.trim().startsWith("{") && item.includes('"caption"')) {
           try {
@@ -1204,6 +1780,7 @@ function CreateFlow({
       setCaption(cleaned[0] ?? "");
     } finally { setSuggesting(false); }
   };
+
   const submitPost = async () => {
     if (platforms.length === 0) {
       toast.error("Please select at least one social media platform");
@@ -1254,6 +1831,8 @@ function CreateFlow({
 
     const record = await publishPost({
       id: "pending",
+      businessId: selectedBizId,
+      socialAccountId: selectedAccountId || undefined,
       headline,
       caption,
       date: targetDate,
@@ -1275,13 +1854,242 @@ function CreateFlow({
     return <div className="mx-auto max-w-xl py-16 text-center sm:py-24"><span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-olive/10 text-olive"><Check className="h-7 w-7" /></span><p className="mt-6 text-[11px] font-semibold uppercase text-primary">ALL SET</p><h1 className="mt-2 font-display text-4xl">{timing === "now" ? "Your post is out there." : "It's in the calendar."}</h1><p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">{timing === "now" ? "Your post is marked as shared. Your next good idea can start whenever you're ready." : `Your post is lined up for ${new Date(`${scheduledDate}T${scheduledTime}`).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}.`}</p><div className="mt-7 flex flex-wrap justify-center gap-3"><Button variant="outline" onClick={() => onNavigate(timing === "now" ? "Posted" : "Scheduled")}>{timing === "now" ? "View posted history" : "Open your calendar"}<ArrowRight className="h-4 w-4" /></Button><Button onClick={onCancel}>Back to home</Button></div></div>;
   }
 
+  const activeInstagram = connectedAccounts.find((a) => a.platform.toLowerCase() === "instagram");
+
   return <>
     <div className="mb-7 flex items-center justify-between gap-3"><div><button className="mb-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={onCancel}><ArrowLeft className="h-3.5 w-3.5" /> Back to workspace</button><h1 className="font-display text-4xl">Create a post</h1></div><span className="hidden text-xs text-muted-foreground sm:inline">A little idea can go a long way.</span></div>
     <div className="mb-8 grid grid-cols-3 border-y" aria-label="Post creation steps">{steps.map((label, index) => <button key={label} onClick={() => index + 1 <= step && setStep(index + 1)} className={`relative flex items-center gap-2.5 py-3 text-left text-xs transition-colors ${step === index + 1 ? "font-semibold text-foreground" : step > index + 1 ? "text-primary" : "text-muted-foreground"}`} aria-current={step === index + 1 ? "step" : undefined}><span className={`flex h-6 w-6 items-center justify-center rounded-full border text-[11px] ${step === index + 1 ? "border-primary bg-primary text-primary-foreground" : step > index + 1 ? "border-primary bg-primary/10" : "border-border"}`}>{step > index + 1 ? <Check className="h-3.5 w-3.5" /> : index + 1}</span><span className="hidden sm:inline">{label}</span><span className="sm:hidden">{index === 0 ? "Describe" : index === 1 ? "Poster" : "Publish"}</span>{index < 2 && <span className="absolute right-0 top-1/2 hidden w-5 border-t sm:block" />}</button>)}</div>
-    {step === 1 && <section className="max-w-3xl border bg-card p-5 sm:p-8"><p className="text-xs text-muted-foreground">THE STARTING POINT</p><h2 className="mt-2 font-display text-3xl">What's happening at {businessName}?</h2><label htmlFor="post-prompt" className="sr-only">Describe your post</label><Textarea id="post-prompt" className="mt-5 min-h-[150px] resize-y border-0 bg-secondary/60 px-4 py-4 text-base leading-7 shadow-none placeholder:text-muted-foreground focus-visible:ring-1" placeholder="Special announcement, offer, or new update from your business" value={prompt} onChange={(event) => setPrompt(event.target.value)} /><div className="mt-5 grid gap-5 border-t pt-5 sm:grid-cols-2"><ChoiceRow label="Style" choices={["Bold", "Minimal", "Festive", "Elegant"]} value={style} onChange={setStyle} /><ChoiceRow label="Format" choices={["Square", "Portrait 4:5", "Story"]} value={format} onChange={setFormat} /></div><div className="mt-5 flex items-center justify-between border-t pt-5"><div><p className="text-sm font-medium">Use my brand colors and logo</p><p className="mt-1 text-xs text-muted-foreground">Keep each post feeling like {businessName}.</p></div><Switch checked={useBrand} onCheckedChange={setUseBrand} aria-label="Use my brand colors and logo" /></div><div className="mt-6 flex items-center justify-between gap-3 border-t pt-5"><p className="text-xs text-muted-foreground">You can edit every detail next.</p><Button className="h-10 gap-2" onClick={startGeneration}>Generate poster <ArrowRight className="h-4 w-4" /></Button></div></section>}
-    {step === 2 && <PosterStep businessName={businessName} logoUrl={brandKit.logoUrl} font={brandKit.font} options={options} selected={selected} loading={loading} headline={headline} price={price} dateText={dateText} onSelect={(index) => { setSelected(index); setHeadline(options[index]?.headline ?? ""); setPrice(options[index]?.price ?? ""); const d = options[index]?.brief?.date_text || options[index]?.date_text; if (d) setDateText(d); }} onHeadline={setHeadline} onPrice={setPrice} onDate={setDateText} onRegenerate={regenerate} onBack={() => setStep(1)} onContinue={() => { if (!currentOption) return; setStep(3); }} />}
-    {step === 3 && <PublishStep businessName={businessName} logoUrl={brandKit.logoUrl} font={brandKit.font} instagramAccount={instagramAccount} option={currentOption} headline={headline} price={price} caption={caption} suggestions={suggestions} suggesting={suggesting} ownCaption={ownCaption} platforms={platforms} timing={timing} scheduledDate={scheduledDate} scheduledTime={scheduledTime} onCaption={setCaption} onSuggest={loadSuggestions} onChooseSuggestion={(text) => setCaption(text)} onPlatforms={setPlatforms} onTiming={setTiming} onDate={setScheduledDate} onTime={setScheduledTime} onBack={() => setStep(2)} onSubmit={() => setConfirmOpen(true)} />}
-    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle className="font-display text-2xl">{timing === "now" ? "Ready to share?" : "Save this to your calendar?"}</DialogTitle><DialogDescription>{timing === "now" ? `Your post will be marked as shared to ${platforms.join(" and ")}.` : `Your post will be scheduled for ${new Date(`${scheduledDate}T${scheduledTime}`).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}.`}</DialogDescription></DialogHeader><div className="my-2 flex gap-3 border-y py-4"><div className="w-[72px]"><Poster theme={currentOption?.theme ?? (brandKit.colors[0]?.toLowerCase() || "tomato")} eyebrow={brandKit.businessName ? brandKit.businessName.toUpperCase() : businessName.toUpperCase()} headline={headline} price={price} dateText={dateText} footer={currentOption?.footer ?? brandKit.tagline ?? "IDEAS INTO SCALABLE PRODUCTS"} logoUrl={brandKit.logoUrl} font={brandKit.font} imageUrl={currentOption?.imageUrl} /></div><div className="min-w-0 py-2"><p className="text-sm font-medium">{headline}</p><p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{caption || "No caption added"}</p><p className="mt-2 text-xs text-muted-foreground">{platforms.join(" · ")}</p></div></div><DialogFooter><Button variant="outline" onClick={() => setConfirmOpen(false)}>Keep editing</Button><Button disabled={publishing} onClick={submitPost}>{publishing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : timing === "now" ? "Post now" : "Schedule post"}</Button></DialogFooter></DialogContent></Dialog>
+    {step === 1 && (
+      <section className="max-w-3xl border bg-card p-5 sm:p-8">
+        {/* POST TO SELECTOR */}
+        <div className="mb-6 rounded-xl border bg-secondary/40 p-4">
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Send className="h-3.5 w-3.5 text-primary" />
+              POST TO
+            </span>
+            {onOpenAddBusiness && (
+              <button
+                type="button"
+                onClick={onOpenAddBusiness}
+                className="text-xs text-primary font-medium hover:underline flex items-center gap-1"
+              >
+                <Plus className="h-3 w-3" /> Add business
+              </button>
+            )}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {/* Business selection */}
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Target Business</label>
+              <select
+                value={selectedBizId}
+                onChange={(e) => handleRequestSwitchBiz(e.target.value)}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {businesses.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Account Selection */}
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Connected Instagram Account</label>
+              {connectedAccounts.length > 0 ? (
+                <select
+                  value={selectedAccountId}
+                  onChange={(e) => setSelectedAccountId(e.target.value)}
+                  className="flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {connectedAccounts.map((acc) => (
+                    <option key={acc.id || acc.handle} value={acc.id || acc.handle}>
+                      @{acc.handle} ({acc.platform})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="flex h-10 items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-xs text-amber-950 dark:text-amber-200">
+                  <span className="truncate">No accounts linked</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs border-amber-600/40 text-amber-950 dark:text-amber-100 hover:bg-amber-500/20 shrink-0"
+                    onClick={() => onNavigate("Accounts")}
+                  >
+                    Connect Instagram first
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {connectedAccounts.length === 0 && (
+            <div className="mt-3 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs">
+              <span className="text-amber-950 dark:text-amber-200">
+                <strong>{businessName}</strong> does not have an Instagram account connected yet.
+              </span>
+              <Button
+                size="sm"
+                className="h-8 gap-1.5 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
+                onClick={() => onNavigate("Accounts")}
+              >
+                <Instagram className="h-3.5 w-3.5" />
+                Connect Instagram first
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <p className="text-xs text-muted-foreground">THE STARTING POINT</p>
+        <h2 className="mt-2 font-display text-3xl">What's happening at {businessName}?</h2>
+        <label htmlFor="post-prompt" className="sr-only">Describe your post</label>
+        <Textarea id="post-prompt" className="mt-5 min-h-[150px] resize-y border-0 bg-secondary/60 px-4 py-4 text-base leading-7 shadow-none placeholder:text-muted-foreground focus-visible:ring-1" placeholder="Special announcement, offer, or new update from your business" value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+        <div className="mt-5 grid gap-5 border-t pt-5 sm:grid-cols-2">
+          <ChoiceRow label="Style" choices={["Bold", "Minimal", "Festive", "Elegant"]} value={style} onChange={setStyle} />
+          <ChoiceRow label="Format" choices={["Square", "Portrait 4:5", "Story"]} value={format} onChange={setFormat} />
+        </div>
+        <div className="mt-5 flex items-center justify-between border-t pt-5">
+          <div>
+            <p className="text-sm font-medium">Use my brand colors and logo</p>
+            <p className="mt-1 text-xs text-muted-foreground">Keep each post feeling like {businessName}.</p>
+          </div>
+          <Switch checked={useBrand} onCheckedChange={setUseBrand} aria-label="Use my brand colors and logo" />
+        </div>
+        <div className="mt-6 flex items-center justify-between gap-3 border-t pt-5">
+          <p className="text-xs text-muted-foreground">You can edit every detail next.</p>
+          <Button className="h-10 gap-2" onClick={startGeneration}>Generate poster <ArrowRight className="h-4 w-4" /></Button>
+        </div>
+      </section>
+    )}
+    {step === 2 && (
+      <PosterStep
+        businessName={businessName}
+        logoUrl={useBrand ? brandKit.logoUrl : undefined}
+        font={brandKit.font}
+        options={options}
+        selected={selected}
+        loading={loading}
+        headline={headline}
+        price={price}
+        dateText={dateText}
+        onOptionsChange={setOptions}
+        onSelect={(index) => {
+          setSelected(index);
+          setHeadline(options[index]?.headline ?? "");
+          setPrice(options[index]?.price ?? "");
+          const d = options[index]?.brief?.date_text || options[index]?.date_text;
+          if (d) setDateText(d);
+        }}
+        onHeadline={setHeadline}
+        onPrice={setPrice}
+        onDate={setDateText}
+        onRegenerate={regenerate}
+        format={format}
+        onBack={() => setStep(1)}
+        onContinue={() => {
+          if (!currentOption) return;
+          setStep(3);
+        }}
+      />
+    )}
+    {step === 3 && (
+      <PublishStep
+        businessName={businessName}
+        logoUrl={useBrand ? brandKit.logoUrl : undefined}
+        font={brandKit.font}
+        instagramAccount={activeInstagram}
+        option={currentOption}
+        headline={headline}
+        price={price}
+        caption={caption}
+        suggestions={suggestions}
+        suggesting={suggesting}
+        ownCaption={ownCaption}
+        platforms={platforms}
+        timing={timing}
+        scheduledDate={scheduledDate}
+        scheduledTime={scheduledTime}
+        onCaption={setCaption}
+        onSuggest={loadSuggestions}
+        onChooseSuggestion={(text) => setCaption(text)}
+        onPlatforms={setPlatforms}
+        onTiming={setTiming}
+        onDate={setScheduledDate}
+        onTime={setScheduledTime}
+        onBack={() => setStep(2)}
+        onSubmit={() => setConfirmOpen(true)}
+      />
+    )}
+    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl">{timing === "now" ? "Ready to share?" : "Save this to your calendar?"}</DialogTitle>
+          <DialogDescription>
+            {timing === "now" ? `Your post will be published to ${businessName}'s ${platforms.join(" and ")} account.` : `Your post will be scheduled for ${new Date(`${scheduledDate}T${scheduledTime}`).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} in ${brandKit.timezone || "local timezone"}.`}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="my-2 flex gap-3 border-y py-4">
+          <div className="w-[72px]">
+            <Poster
+              theme={currentOption?.theme ?? (brandKit.colors[0]?.toLowerCase() || "tomato")}
+              eyebrow={brandKit.businessName ? brandKit.businessName.toUpperCase() : businessName.toUpperCase()}
+              headline={headline}
+              price={price}
+              dateText={dateText}
+              footer={currentOption?.footer ?? brandKit.tagline ?? "IDEAS INTO SCALABLE PRODUCTS"}
+              logoUrl={brandKit.logoUrl}
+              font={brandKit.font}
+              imageUrl={currentOption?.imageUrl}
+            />
+          </div>
+          <div className="min-w-0 py-2">
+            <p className="text-sm font-medium">{headline}</p>
+            <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{caption || "No caption added"}</p>
+            <p className="mt-2 text-xs text-muted-foreground">{platforms.join(" · ")}</p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setConfirmOpen(false)}>Keep editing</Button>
+          <Button disabled={publishing} onClick={submitPost}>{publishing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : timing === "now" ? "Post now" : "Schedule post"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* Mid-flow Business Switch Warning Dialog */}
+    <Dialog open={switchWarnOpen} onOpenChange={setSwitchWarnOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl text-amber-600 flex items-center gap-2">
+            <span>⚠️</span> Switch Business Workspace?
+          </DialogTitle>
+          <DialogDescription>
+            You are currently in the middle of creating a post. Switching business now will reset your generated poster layouts and custom edits.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-2 text-xs text-muted-foreground leading-relaxed">
+          Each business has its own distinct brand kit, logos, and connected Instagram accounts. Posters generated for one workspace cannot be posted to another.
+        </div>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={() => setSwitchWarnOpen(false)}>
+            Keep Editing Current Post
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => {
+              if (pendingBizId) {
+                executeBizSwitch(pendingBizId);
+              }
+            }}
+          >
+            Switch & Reset Poster
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </>;
 }
 
@@ -1289,13 +2097,142 @@ function ChoiceRow({ label, choices, value, onChange }: { label: string; choices
   return <div><p className="mb-2 text-xs font-medium">{label}</p><div className="flex flex-wrap gap-1.5">{choices.map((choice) => <Button key={choice} variant={value === choice ? "secondary" : "outline"} size="sm" className={`h-8 px-2.5 text-xs ${value === choice ? "border-primary/30 text-primary" : "font-normal text-muted-foreground"}`} onClick={() => onChange(choice)} aria-pressed={value === choice}>{choice}</Button>)}</div></div>;
 }
 
-function PosterStep({ businessName, logoUrl, font, options, selected, loading, headline, price, dateText, onSelect, onHeadline, onPrice, onDate, onRegenerate, onBack, onContinue }: { businessName?: string; logoUrl?: string | undefined; font?: string | undefined; options: PosterOption[]; selected: number; loading: boolean; headline: string; price: string; dateText: string; onSelect: (index: number) => void; onHeadline: (value: string) => void; onPrice: (value: string) => void; onDate: (value: string) => void; onRegenerate: () => void; onBack: () => void; onContinue: () => void }) {
-  const [editText, setEditText] = useState(false);
+function PosterStep({
+  businessName,
+  logoUrl,
+  font,
+  format = "Portrait 4:5",
+  options,
+  selected,
+  loading,
+  headline,
+  price,
+  dateText,
+  onOptionsChange,
+  onSelect,
+  onHeadline,
+  onPrice,
+  onDate,
+  onRegenerate,
+  onBack,
+  onContinue,
+}: {
+  businessName?: string;
+  logoUrl?: string | undefined;
+  font?: string | undefined;
+  format?: string | undefined;
+  options: PosterOption[];
+  selected: number;
+  loading: boolean;
+  headline: string;
+  price: string;
+  dateText: string;
+  onOptionsChange?: (options: PosterOption[]) => void;
+  onSelect: (index: number) => void;
+  onHeadline: (value: string) => void;
+  onPrice: (value: string) => void;
+  onDate: (value: string) => void;
+  onRegenerate: () => void;
+  onBack: () => void;
+  onContinue: () => void;
+}) {
+  const [aiEditOpen, setAiEditOpen] = useState(false);
+  const [aiEditInstruction, setAiEditInstruction] = useState("");
+  const [aiEditing, setAiEditing] = useState(false);
   const [renderTick, setRenderTick] = useState(0);
-  useMemo(() => { if (!loading) return undefined; const id = window.setInterval(() => setRenderTick((value) => value + 1), 850); return () => window.clearInterval(id); }, [loading]);
-  if (loading || !options.length) return <div className="grid gap-8 lg:grid-cols-[1fr_270px]"><div><p className="text-xs text-muted-foreground">A FEW DIRECTIONS TO TRY</p><h2 className="mt-2 font-display text-3xl">Finding the right feeling.</h2><div className="mt-6 grid grid-cols-2 gap-3 max-w-[540px]">{[0,1].map((index) => <div key={index} className="aspect-[4/5] animate-pulse border bg-secondary" />)}</div></div><div className="flex flex-col justify-center border-t pt-6 lg:border-l lg:border-t-0 lg:pl-7 lg:pt-0"><span className="text-[11px] font-semibold uppercase text-primary">{["Writing the design brief", "Rendering two directions", "Adding your brand details"][renderTick % 3]}</span><div className="mt-4 h-1 overflow-hidden bg-secondary"><div className="h-full w-2/3 animate-pulse bg-primary" /></div><p className="mt-3 text-xs text-muted-foreground">Good things take a moment.</p></div></div>;
-  const option = options[selected];
+  const aiEditInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const option = options[selected] || options[0];
+
+  useEffect(() => {
+    if (!loading) return;
+    const id = window.setInterval(() => setRenderTick((value) => value + 1), 850);
+    return () => window.clearInterval(id);
+  }, [loading]);
+
+  const dynamicSuggestions = useMemo(() => {
+    const category = option?.brief?.category;
+    const hl = (option?.headline || headline || "").toLowerCase();
+
+    if (category === "product_tech" || hl.includes("ai") || hl.includes("masterclass") || hl.includes("tech") || hl.includes("software") || hl.includes("engineer")) {
+      return {
+        placeholder: "Describe what you want to change (e.g. Change timing to 6:00 PM IST. Add interactive hands-on demo highlight and make neon tech lighting brighter)...",
+        suggestions: [
+          "Change timing to 6:00 PM IST",
+          "Make neon tech lighting brighter",
+          "Change badge to Free Registration",
+          "Highlight live hands-on coding",
+        ],
+      };
+    }
+
+    if (category === "festival" || hl.includes("diwali") || hl.includes("festiv") || hl.includes("eid")) {
+      return {
+        placeholder: "Describe what you want to change (e.g. Change venue to Marriott Resort. Add 7 PM timing and add more golden glowing diyas and lanterns)...",
+        suggestions: [
+          "Change venue to Marriott Resort",
+          "Add timing: 7 PM onwards",
+          "Add more glowing diyas & lanterns",
+          "Change badge to Grand Diwali Party",
+        ],
+      };
+    }
+
+    if (category === "food" || hl.includes("pizza") || hl.includes("burger") || hl.includes("cafe") || hl.includes("food") || hl.includes("dining")) {
+      return {
+        placeholder: "Describe what you want to change (e.g. Add 20% OFF badge. Make food photography warmer and add 'Free Home Delivery' tag)...",
+        suggestions: [
+          "Add 20% OFF Special Offer",
+          "Make food lighting warmer",
+          "Add 'Free Home Delivery' badge",
+          "Change crust to Wood-Fired Artisan",
+        ],
+      };
+    }
+
+    return {
+      placeholder: "Describe what you want to change (e.g. Change venue to Taj Hotel, Mumbai. Add 7 PM timing and make background lighting more golden and festive)...",
+      suggestions: [
+        "Change venue to Taj Hotel, Mumbai",
+        "Add timing: 7 PM onwards",
+        "Make background more grand and festive",
+        "Change badge to 3rd Anniversary",
+      ],
+    };
+  }, [option?.brief?.category, option?.headline, headline]);
+
+  const focusAiEdit = () => {
+    aiEditInputRef.current?.focus();
+    aiEditInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  if (loading || !options.length) {
+    return (
+      <div className="grid gap-8 lg:grid-cols-[1fr_270px]">
+        <div>
+          <p className="text-xs text-muted-foreground">A FEW DIRECTIONS TO TRY</p>
+          <h2 className="mt-2 font-display text-3xl">Finding the right feeling.</h2>
+          <div className="mt-6 grid grid-cols-2 gap-3 max-w-[540px]">
+            {[0, 1].map((index) => (
+              <div key={index} className="aspect-[4/5] animate-pulse border bg-secondary" />
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col justify-center border-t pt-6 lg:border-l lg:border-t-0 lg:pl-7 lg:pt-0">
+          <span className="text-[11px] font-semibold uppercase text-primary">
+            {["Writing the design brief", "Rendering two directions", "Adding your brand details"][renderTick % 3]}
+          </span>
+          <div className="mt-4 h-1 overflow-hidden bg-secondary">
+            <div className="h-full w-2/3 animate-pulse bg-primary" />
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">Good things take a moment.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!option) return null;
+
   const savePoster = async () => {
     try {
       const dataUrl = await renderPosterCanvas({
@@ -1308,6 +2245,7 @@ function PosterStep({ businessName, logoUrl, font, options, selected, loading, h
         imageUrl: option.imageUrl,
         logoUrl,
         font,
+        format: option.format || format,
       });
       const anchor = document.createElement("a");
       anchor.href = dataUrl;
@@ -1318,7 +2256,340 @@ function PosterStep({ businessName, logoUrl, font, options, selected, loading, h
       toast.error("Failed to export poster image");
     }
   };
-  return <div className="grid gap-8 lg:grid-cols-[1fr_310px]"><div><p className="text-xs text-muted-foreground">A FEW DIRECTIONS TO TRY</p><h2 className="mt-2 font-display text-3xl">Choose the one that feels right.</h2><div className={`mt-5 grid gap-3 max-w-[540px] ${options.length <= 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4"}`}>{options.map((item, index) => <button key={item.id} onClick={() => onSelect(index)} className={`group border bg-card p-2.5 text-left transition-colors ${selected === index ? "border-primary" : "border-border hover:border-primary/50"}`} aria-pressed={selected === index} aria-label={`Select poster ${index + 1}`}><Poster theme={item.theme} eyebrow={item.eyebrow} headline={item.headline} price={item.price} dateText={item.date_text || item.brief?.date_text} footer={item.footer} selected={selected === index} logoUrl={logoUrl} font={font} imageUrl={item.imageUrl} needsReview={item.needs_review} /><span className="mt-2 block text-[11px] text-muted-foreground">Direction {index + 1}</span></button>)}</div><div className="mt-5 flex flex-wrap gap-2"><Button variant="outline" className="gap-2" onClick={onRegenerate}><Sparkles className="h-4 w-4" /> Try two more</Button><Button variant="ghost" className="gap-2" onClick={savePoster}><ArrowDownToLine className="h-4 w-4" /> Download</Button></div></div><div className="lg:sticky lg:top-24 lg:self-start"><p className="mb-3 text-xs font-medium">YOUR PICK</p><div className="mx-auto max-w-[270px]"><Poster theme={option.theme} eyebrow={option.eyebrow} headline={headline} price={price} dateText={dateText} footer={option.footer} logoUrl={logoUrl} font={font} imageUrl={option.imageUrl} needsReview={option.needs_review} /></div><div className="mt-4 flex items-center justify-between"><p className="text-xs text-muted-foreground">Make a quick edit</p><Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setEditText(!editText)}>{editText ? "Done" : "Edit text"}</Button></div>{editText && <div className="mt-3 space-y-2"><Input aria-label="Poster headline" value={headline} onChange={(event) => onHeadline(event.target.value)} placeholder="Headline" /><Input aria-label="Poster price" value={price} onChange={(event) => onPrice(event.target.value)} placeholder="Price" /><Input aria-label="Poster date or offer detail" value={dateText} onChange={(event) => onDate(event.target.value)} placeholder="Date or offer detail" /></div>}<div className="mt-4 flex gap-2"><Button variant="outline" className="flex-1" onClick={onBack}>Back</Button><Button className="flex-1 gap-2" onClick={onContinue}>Continue <ArrowRight className="h-4 w-4" /></Button></div></div></div>;
+
+  const handleAiEditSubmit = async () => {
+    if (!aiEditInstruction.trim()) {
+      toast.error("Please enter what changes you would like to make.");
+      return;
+    }
+    const currentOpt = options[selected];
+    if (!currentOpt) return;
+
+    setAiEditing(true);
+    try {
+      const updatedOption = await editPosterWithAi({
+        imageUrl: currentOpt.imageUrl || "",
+        instruction: aiEditInstruction.trim(),
+        optionId: currentOpt.id,
+        currentBrief: currentOpt.brief,
+      });
+
+      const nextOptions = [...options];
+      nextOptions[selected] = updatedOption;
+      if (onOptionsChange) {
+        onOptionsChange(nextOptions);
+      }
+      if (updatedOption.headline) onHeadline(updatedOption.headline);
+      if (updatedOption.price) onPrice(updatedOption.price);
+      const newDate = updatedOption.brief?.date_text || updatedOption.date_text;
+      if (newDate) onDate(newDate);
+
+      setAiEditOpen(false);
+      setAiEditInstruction("");
+      toast.success("Poster image updated with your changes!");
+    } catch (err: any) {
+      console.error("[AI Poster Edit Error]", err);
+      toast.error(err?.message || "Failed to update poster with AI");
+    } finally {
+      setAiEditing(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="grid gap-8 lg:grid-cols-[1fr_310px]">
+        <div>
+          <p className="text-xs text-muted-foreground">A FEW DIRECTIONS TO TRY</p>
+          <h2 className="mt-2 font-display text-3xl">Choose the one that feels right.</h2>
+          <div className={`mt-5 grid gap-3 max-w-[540px] ${options.length <= 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4"}`}>
+            {options.map((item, index) => (
+              <button
+                key={item.id}
+                onClick={() => onSelect(index)}
+                className={`group border bg-card p-2.5 text-left transition-colors relative ${selected === index ? "border-primary ring-1 ring-primary/40" : "border-border hover:border-primary/50"}`}
+                aria-pressed={selected === index}
+                aria-label={`Select poster ${index + 1}`}
+              >
+                <Poster
+                  theme={item.theme}
+                  eyebrow={item.eyebrow}
+                  headline={item.headline}
+                  price={item.price}
+                  dateText={item.date_text || item.brief?.date_text}
+                  footer={item.footer}
+                  selected={selected === index}
+                  logoUrl={logoUrl}
+                  font={font}
+                  format={item.format || format}
+                  imageUrl={item.imageUrl}
+                  needsReview={item.needs_review}
+                />
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="block text-[11px] text-muted-foreground font-medium">Direction {index + 1}</span>
+                  {selected === index && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary">
+                      <Sparkles className="h-3 w-3" /> Selected
+                    </span>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            <Button variant="outline" className="gap-2" onClick={onRegenerate}>
+              <Sparkles className="h-4 w-4" /> Try two more
+            </Button>
+            <Button
+              variant="outline"
+              className="gap-2 text-primary border-primary/40 hover:bg-primary/5"
+              onClick={focusAiEdit}
+            >
+              <Sparkles className="h-4 w-4 text-primary" /> Edit with AI
+            </Button>
+            <Button variant="ghost" className="gap-2" onClick={savePoster}>
+              <ArrowDownToLine className="h-4 w-4" /> Download
+            </Button>
+          </div>
+        </div>
+
+        <div className="lg:sticky lg:top-24 lg:self-start">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">YOUR PICK</p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10"
+              onClick={focusAiEdit}
+            >
+              <Sparkles className="h-3 w-3" /> Edit with AI
+            </Button>
+          </div>
+
+          <div className="mx-auto max-w-[270px] relative">
+            <Poster
+              theme={option.theme}
+              eyebrow={option.eyebrow}
+              headline={headline}
+              price={price}
+              dateText={dateText}
+              footer={option.footer}
+              logoUrl={logoUrl}
+              font={font}
+              format={option.format || format}
+              imageUrl={option.imageUrl}
+              needsReview={option.needs_review}
+            />
+
+            {aiEditing && (
+              <div className="absolute inset-0 bg-background/85 backdrop-blur-[2px] flex flex-col items-center justify-center p-4 rounded text-center gap-2 z-10 border border-primary/30">
+                <LoaderCircle className="h-6 w-6 animate-spin text-primary" />
+                <p className="text-xs font-semibold text-foreground">Applying changes with AI...</p>
+                <p className="text-[11px] text-muted-foreground">Refining design brief & rendering image</p>
+              </div>
+            )}
+          </div>
+
+          {/* AI Image Edit Box right under YOUR PICK */}
+          <div className="mt-4 rounded-lg border border-primary/25 bg-card p-3 shadow-sm space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Edit this image with AI</span>
+              </div>
+              {aiEditInstruction && (
+                <button
+                  type="button"
+                  onClick={() => setAiEditInstruction("")}
+                  className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                  disabled={aiEditing}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            <Textarea
+              ref={aiEditInputRef}
+              id="ai-edit-textarea-yourpick"
+              aria-label="Describe changes to make to this image"
+              className="min-h-[80px] resize-none text-xs leading-5 border-border bg-background/80 placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-primary/50"
+              placeholder={dynamicSuggestions.placeholder}
+              value={aiEditInstruction}
+              onChange={(e) => setAiEditInstruction(e.target.value)}
+              disabled={aiEditing}
+            />
+
+            {/* Quick Suggestion Chips */}
+            <div className="space-y-1">
+              <p className="text-[10px] uppercase font-semibold text-muted-foreground">Quick Suggestions</p>
+              <div className="flex flex-wrap gap-1">
+                {dynamicSuggestions.suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() =>
+                      setAiEditInstruction((prev) =>
+                        prev ? `${prev}. ${suggestion}` : suggestion
+                      )
+                    }
+                    className="rounded-full border border-border bg-secondary/50 px-2 py-0.5 text-[10px] text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors"
+                    disabled={aiEditing}
+                  >
+                    + {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <Button
+              size="sm"
+              className="w-full gap-2 text-xs h-9 shadow-sm"
+              onClick={handleAiEditSubmit}
+              disabled={aiEditing || !aiEditInstruction.trim()}
+            >
+              {aiEditing ? (
+                <>
+                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                  Applying Changes to Image...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Update Image with AI
+                </>
+              )}
+            </Button>
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={onBack}>
+              Back
+            </Button>
+            <Button className="flex-1 gap-2" onClick={onContinue}>
+              Continue <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* AI Edit Modal Dialog */}
+      <Dialog
+        open={aiEditOpen}
+        onOpenChange={(open) => {
+          if (!aiEditing) setAiEditOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 font-display text-xl">
+              <Sparkles className="h-5 w-5 text-primary" />
+              Edit Poster with AI
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-5">
+              Enter the exact changes you want (venue, dates, timing, background, colors, or headline). An AI LLM will refine the design brief and update the image.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Current Poster Info Preview */}
+            <div className="flex items-center gap-3.5 rounded-lg border bg-secondary/30 p-2.5">
+              <div className="h-20 w-16 shrink-0 overflow-hidden rounded border bg-black shadow-sm">
+                {option.imageUrl ? (
+                  <img
+                    src={option.imageUrl}
+                    alt="Current poster"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="h-full w-full bg-secondary flex items-center justify-center text-[10px] text-muted-foreground">
+                    Poster
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold">{headline || option.headline}</p>
+                <p className="truncate text-[11px] text-primary font-medium mt-0.5">
+                  {option.brief?.venue_text ? `Venue: ${option.brief.venue_text}` : (option.venue_text ? `Venue: ${option.venue_text}` : "Custom Venue")}
+                </p>
+                <p className="truncate text-[11px] text-muted-foreground mt-0.5">
+                  {dateText || option.date_text || "Ready for AI refinement"}
+                </p>
+              </div>
+            </div>
+
+            {/* Instruction Textarea */}
+            <div>
+              <label htmlFor="ai-edit-prompt" className="text-xs font-medium text-foreground block mb-1.5">
+                What changes would you like to make?
+              </label>
+              <Textarea
+                id="ai-edit-prompt"
+                className="min-h-[100px] resize-none text-xs leading-5 border-border bg-background"
+                placeholder="e.g. Change venue to Taj Hotel, Mumbai. Add 7 PM timing and make the background lighting more warm, celebratory with golden accents."
+                value={aiEditInstruction}
+                onChange={(e) => setAiEditInstruction(e.target.value)}
+                disabled={aiEditing}
+              />
+            </div>
+
+            {/* Quick Suggestion Chips */}
+            <div>
+              <p className="text-[10px] uppercase font-semibold text-muted-foreground mb-1.5">Quick Suggestions</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  "Change venue to Taj Hotel, Mumbai",
+                  "Add timing: 7 PM onwards",
+                  "Change badge to 3rd Anniversary",
+                  "Make background more grand and festive",
+                  "Add cocktail & dinner gala detail",
+                ].map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => setAiEditInstruction((prev) => prev ? `${prev}. ${suggestion}` : suggestion)}
+                    className="rounded-full border border-border bg-secondary/50 px-2.5 py-1 text-[11px] text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors"
+                    disabled={aiEditing}
+                  >
+                    + {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0 border-t pt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAiEditOpen(false)}
+              disabled={aiEditing}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="gap-2"
+              onClick={handleAiEditSubmit}
+              disabled={aiEditing || !aiEditInstruction.trim()}
+            >
+              {aiEditing ? (
+                <>
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                  Applying Changes with AI...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Generate Changes
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 function PublishStep({
@@ -1944,7 +3215,24 @@ function BrandKit({
   const [font, setFont] = useState(data.font || "Fraunces");
   const [logoName, setLogoName] = useState(data.logoName || "");
   const [logoUrl, setLogoUrl] = useState(data.logoUrl || "");
+  const [tone, setTone] = useState(data.tone || "Friendly");
+  const [timezone, setTimezone] = useState(data.timezone || "Asia/Kolkata");
+  const [defaultHashtags, setDefaultHashtags] = useState(data.defaultHashtags || "");
   const [uploadingLogo, setUploadingLogo] = useState(false);
+
+  useEffect(() => {
+    setName(data.businessName || "");
+    setTagline(data.tagline || "");
+    setLocation(data.location || "");
+    setPhone(data.phone || "");
+    setColors(data.colors && data.colors.length > 0 ? data.colors : ["Tomato", "Olive"]);
+    setFont(data.font || "Fraunces");
+    setLogoName(data.logoName || "");
+    setLogoUrl(data.logoUrl || "");
+    setTone(data.tone || "Friendly");
+    setTimezone(data.timezone || "Asia/Kolkata");
+    setDefaultHashtags(data.defaultHashtags || "");
+  }, [data.businessId, data.businessName, data.logoUrl]);
 
   const toggleColor = (color: string) =>
     setColors(
@@ -1961,6 +3249,7 @@ function BrandKit({
       return;
     }
     const updated: BrandKitData = {
+      businessId: data.businessId,
       businessName: name.trim() || "Avero Innovations",
       tagline: tagline.trim(),
       location: location.trim(),
@@ -1969,6 +3258,9 @@ function BrandKit({
       font,
       logoName,
       logoUrl,
+      tone,
+      timezone,
+      defaultHashtags,
     };
     onSave(updated);
   };
@@ -2252,95 +3544,72 @@ function LabeledInput({ label, value, onChange }: { label: string; value: string
 function Accounts({
   connectedAccounts,
   businessName,
+  activeBusinessId,
+  businesses = [],
+  billingInfo,
   userEmail,
+  onRefresh,
   onAccountsChange,
+  onConnect,
 }: {
-  connectedAccounts: { platform: string; handle: string }[];
+  connectedAccounts: Array<{ id?: string; platform: string; handle: string; status?: string; externalAccountId?: string }>;
   businessName: string;
+  activeBusinessId?: string;
+  businesses?: BusinessSummaryItem[];
+  billingInfo?: { isFreeTier: boolean; notice: string; totalAccounts: number };
   userEmail: string;
-  onAccountsChange: (accounts: { platform: string; handle: string }[]) => void;
+  onRefresh?: () => void;
+  onAccountsChange?: (accounts: any[]) => void;
+  onConnect?: (bizId: string) => void;
 }) {
   const isMeetSoni = userEmail === "meetsoni1075@gmail.com";
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>("Instagram");
-  const [handleInput, setHandleInput] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const isConnected = (p: Platform) =>
-    connectedAccounts.some((a) => a.platform.toLowerCase() === p.toLowerCase());
+  const instagramAccounts = connectedAccounts.filter(
+    (a) => a.platform.toLowerCase() === "instagram"
+  );
+  const isInstagramActive = instagramAccounts.length > 0;
 
-  const getHandle = (p: Platform) =>
-    connectedAccounts.find((a) => a.platform.toLowerCase() === p.toLowerCase())?.handle;
-
-  const handleDisconnect = async (platform: Platform) => {
+  const handleDisconnect = async (accountId?: string, platform: Platform = "Instagram") => {
     try {
-      await disconnectAccount({ data: { platform } });
-    } catch {}
-    onAccountsChange(connectedAccounts.filter((a) => a.platform.toLowerCase() !== platform.toLowerCase()));
-    toast.success(`${platform} disconnected`);
-  };
-
-  const handleConnectClick = (platform: Platform) => {
-    setSelectedPlatform(platform);
-    setHandleInput("");
-    setConnectModalOpen(true);
-  };
-
-  const handleConfirmConnect = async () => {
-    const handle = handleInput.trim().replace(/^@/, "");
-    if (!handle) {
-      toast.error("Please enter a valid handle or username");
-      return;
+      await disconnectAccount({
+        data: {
+          business_id: activeBusinessId,
+          account_id: accountId,
+          platform,
+        },
+      });
+      toast.success(`${platform} disconnected`);
+      onRefresh?.();
+    } catch (err: any) {
+      toast.error(err?.message || `Failed to disconnect ${platform}`);
     }
-    if (!REGEX.socialHandle.test(handle)) {
-      toast.error("Invalid handle: 1-30 characters, letters, numbers, periods, or underscores only");
-      return;
-    }
-
-    if (selectedPlatform === "Instagram") {
-      const isAvero = handle.toLowerCase() === "avero.innovations";
-      if (!isAvero && !isMeetSoni) {
-        toast.error("Real Meta/Instagram OAuth required for this account. Fake simulated connections are disabled.");
-        return;
-      }
-      setLoading(true);
-      try {
-        await connectAccount({
-          data: {
-            platform: "Instagram",
-            platform_handle: handle,
-            zernio_account_id: "6ad374deed0fd3de6bd7bee9",
-          },
-        });
-        onAccountsChange([
-          ...connectedAccounts.filter((a) => a.platform.toLowerCase() !== "instagram"),
-          { platform: "Instagram", handle },
-        ]);
-        toast.success(`Instagram connected (@${handle})`);
-      } catch (err: any) {
-        toast.error(err?.message || "Failed to connect Instagram");
-      } finally {
-        setLoading(false);
-        setConnectModalOpen(false);
-      }
-      return;
-    }
-
-    // Facebook / X
-    toast.error(`${selectedPlatform} live publishing requires active API credentials. Fake simulated connections are disabled.`);
   };
 
   const handleStartOAuth = async () => {
+    if (!activeBusinessId) {
+      toast.error("No active business selected");
+      return;
+    }
     setLoading(true);
     try {
-      const res = await getZernioConnectUrl({ data: { platform: selectedPlatform } });
+      if (onConnect) {
+        onConnect(activeBusinessId);
+        return;
+      }
+      const res = await getZernioConnectUrl({
+        data: { platform: selectedPlatform, businessId: activeBusinessId },
+      });
       const url = (res as any)?.data?.url ?? (res as any)?.url;
       if (url) {
         toast.info(`Redirecting to ${selectedPlatform} OAuth authorization...`);
         window.location.href = url;
         return;
       }
-      toast.error("Could not generate OAuth connect URL");
+      const errMsg = (res as any)?.error?.message || (res as any)?.message || "Could not generate OAuth connect URL";
+      toast.error(errMsg);
     } catch (err: any) {
       toast.error(err?.message || "Failed to start OAuth flow");
     } finally {
@@ -2348,33 +3617,148 @@ function Accounts({
     }
   };
 
-  const isInstagramActive = isConnected("Instagram");
+  const totalConnected = billingInfo?.totalAccounts ?? connectedAccounts.length;
+  const isFreeTier = billingInfo?.isFreeTier ?? totalConnected <= 2;
 
   return (
     <>
       <ScreenTitle
-        eyebrow="YOUR SOCIAL CONNECTIONS"
+        eyebrow="WORKSPACE SOCIAL CONNECTIONS"
         title="Accounts"
-        description="Choose where your posts should land."
+        description={`Manage Instagram and social media connections specifically for ${businessName}.`}
       />
+
+      {/* Zernio Account Billing Notice */}
+      <div className="mb-6 max-w-3xl rounded-xl border bg-secondary/50 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className={`h-2.5 w-2.5 rounded-full ${isFreeTier ? "bg-olive animate-pulse" : "bg-primary"}`} />
+            <div>
+              <p className="text-xs font-semibold text-foreground">
+                Zernio Account Tier · {totalConnected} Connected Account{totalConnected === 1 ? "" : "s"} Total
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                {billingInfo?.notice ||
+                  (isFreeTier
+                    ? "Free Tier active: First 2 connected accounts across your workspaces are included free."
+                    : "Paid Tier: Billed per connected account ($6/mo for 3-10 accounts, $3/mo for 11+ accounts).")}
+              </p>
+            </div>
+          </div>
+          <span className="rounded-full border bg-background px-2.5 py-1 text-[10px] font-mono font-medium text-muted-foreground">
+            {isFreeTier ? `${totalConnected}/2 Free Used` : `${totalConnected} Accounts Active`}
+          </span>
+        </div>
+      </div>
+
       <div className="max-w-3xl divide-y border-y">
-        {(["Instagram", "Facebook", "X"] as Platform[]).map((platform) => {
-          const connected = isConnected(platform);
-          const handle = getHandle(platform);
+        {/* Instagram Section */}
+        <div className="py-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <span className="flex h-11 w-11 items-center justify-center rounded-lg border bg-card text-foreground">
+                <Instagram className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold flex items-center gap-2">
+                  Instagram Professional
+                  {isInstagramActive && (
+                    <span className="rounded-full bg-olive/10 px-2 py-0.5 text-[10px] font-medium text-olive">
+                      Active
+                    </span>
+                  )}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Direct image and carousel posting via Meta Graph API for {businessName}.
+                </p>
+              </div>
+            </div>
+            <Button
+              className="gap-2"
+              onClick={() => {
+                setSelectedPlatform("Instagram");
+                setConnectModalOpen(true);
+              }}
+            >
+              <Instagram className="h-4 w-4" />
+              {isInstagramActive ? "Add Another Account" : "Connect Instagram"}
+            </Button>
+          </div>
+
+          {/* Connected Instagram Accounts List */}
+          {instagramAccounts.length > 0 && (
+            <div className="mt-4 space-y-2 border-t pt-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Connected Handles for {businessName}:
+              </p>
+              <div className="space-y-2">
+                {instagramAccounts.map((acc) => {
+                  const isExpired = acc.status === "expired" || acc.status === "failed";
+                  return (
+                    <div
+                      key={acc.id || acc.handle}
+                      className="flex items-center justify-between rounded-lg border bg-card p-3"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                          @
+                        </span>
+                        <div>
+                          <p className="text-xs font-medium text-foreground">@{acc.handle}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${
+                                isExpired ? "bg-amber-500" : "bg-olive animate-pulse"
+                              }`}
+                            />
+                            <span className="text-[10px] text-muted-foreground capitalize">
+                              {isExpired ? "Token Expired" : "Connected & Verified"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isExpired && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs text-amber-600 border-amber-500/40 hover:bg-amber-500/10"
+                            onClick={() => onConnect?.(activeBusinessId || "")}
+                          >
+                            Reconnect
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          onClick={() => handleDisconnect(acc.id, "Instagram")}
+                        >
+                          Disconnect
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Facebook & X rows */}
+        {(["Facebook", "X"] as Platform[]).map((platform) => {
+          const acc = connectedAccounts.find((a) => a.platform.toLowerCase() === platform.toLowerCase());
+          const connected = Boolean(acc);
           return (
             <div key={platform} className="flex flex-wrap items-center justify-between gap-4 py-5">
               <div className="flex items-center gap-4">
-                <span className="flex h-11 w-11 items-center justify-center border bg-card">
-                  {platform === "Instagram" ? (
-                    <Instagram className="h-5 w-5" />
-                  ) : (
-                    <span className="text-lg font-bold">{platform === "Facebook" ? "f" : "𝕏"}</span>
-                  )}
+                <span className="flex h-11 w-11 items-center justify-center rounded-lg border bg-card">
+                  <span className="text-lg font-bold">{platform === "Facebook" ? "f" : "𝕏"}</span>
                 </span>
                 <div>
                   <p className="text-sm font-semibold">{platform}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {connected ? `Connected · @${handle || "connected"}` : "Not connected yet"}
+                    {connected ? `Connected · @${acc?.handle}` : "Not connected yet"}
                   </p>
                 </div>
               </div>
@@ -2383,9 +3767,10 @@ function Accounts({
                 size="sm"
                 onClick={() => {
                   if (connected) {
-                    handleDisconnect(platform);
+                    handleDisconnect(acc?.id, platform);
                   } else {
-                    handleConnectClick(platform);
+                    setSelectedPlatform(platform);
+                    setConnectModalOpen(true);
                   }
                 }}
               >
@@ -2395,41 +3780,40 @@ function Accounts({
           );
         })}
       </div>
+
       <p className="mt-5 max-w-3xl border-l-2 border-primary/50 py-1 pl-4 text-xs leading-5 text-muted-foreground">
         {isInstagramActive
-          ? `Instagram Business/Creator account connected and active via Meta Graph API.`
-          : "Connect your Instagram Professional (Business or Creator) account to enable direct publishing from PostPilot."}
+          ? `Instagram Business/Creator account active for ${businessName}. Posters generated in this workspace publish exclusively to this account.`
+          : `Connect your Instagram Professional (Business or Creator) account for ${businessName} to enable automated publishing.`}
       </p>
 
       {/* Connect Account Modal */}
       <Dialog open={connectModalOpen} onOpenChange={setConnectModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="font-display text-2xl">Connect {selectedPlatform}</DialogTitle>
+            <DialogTitle className="font-display text-2xl flex items-center gap-2">
+              <Instagram className="h-5 w-5 text-primary" />
+              Connect {selectedPlatform} to {businessName}
+            </DialogTitle>
             <DialogDescription>
-              Authorize your {selectedPlatform} professional account to publish and schedule posts.
+              Link your professional social account for <strong>{businessName}</strong>.
             </DialogDescription>
           </DialogHeader>
 
           <div className="my-2 space-y-4">
-            {/* Account Type Requirement Warning */}
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-left text-xs leading-5 text-amber-950 dark:text-amber-200">
               <p className="font-semibold flex items-center gap-1.5 text-foreground">
-                <span className="text-amber-600 font-bold">⚠️</span> Professional Account Required (Business / Creator)
+                <span className="text-amber-600 font-bold">⚠️</span> Professional Account Required
               </p>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Meta Graph API and Zernio only support Instagram <strong>Business</strong> or <strong>Creator</strong> accounts. Personal accounts cannot publish via API.
-              </p>
-              <p className="mt-1 text-[10px] text-muted-foreground italic">
-                Free switch in 10s: Instagram App → Settings → Account type & tools → Switch to Professional Account.
+                Meta Graph API and Zernio require an Instagram <strong>Business</strong> or <strong>Creator</strong> profile. Personal accounts are not supported by Meta's API.
               </p>
             </div>
 
-            {/* Automated OAuth Button */}
             <div>
-              <p className="mb-2 text-xs font-semibold text-foreground">Option 1: Automated OAuth Flow (Recommended)</p>
+              <p className="mb-2 text-xs font-semibold text-foreground">Automated OAuth Flow via Zernio</p>
               <p className="mb-3 text-xs text-muted-foreground">
-                Opens the secure Instagram login screen where you enter your Instagram username and password. You will only connect your own verified account.
+                You will be redirected to Instagram to authorize posting for <strong>{businessName}</strong>. The connection will be mapped exclusively to this workspace.
               </p>
               <Button
                 type="button"
@@ -2461,28 +3845,235 @@ function Accounts({
 
 function SettingsPage({
   businessName,
+  activeBusinessId,
+  businesses = [],
+  brandKit,
+  posts = [],
   onBusinessNameChange,
+  onRefresh,
+  onDeleteBusiness,
   isMeetSoni,
 }: {
   businessName: string;
+  activeBusinessId?: string;
+  businesses?: BusinessSummaryItem[];
+  brandKit?: BrandKitData;
+  posts?: SocialPost[];
   onBusinessNameChange: (name: string) => void;
+  onRefresh?: () => void;
+  onDeleteBusiness?: (bizId: string) => void;
   isMeetSoni: boolean;
 }) {
   const [business, setBusiness] = useState(businessName);
-  const [timezone, setTimezone] = useState("Asia/Kolkata");
-  const [tone, setTone] = useState("Friendly");
+  const [tagline, setTagline] = useState(brandKit?.tagline || "");
+  const [timezone, setTimezone] = useState(brandKit?.timezone || "Asia/Kolkata");
+  const [tone, setTone] = useState(brandKit?.tone || "Friendly");
   const [hashtags, setHashtags] = useState(
-    isMeetSoni
-      ? "#AveroInnovations, #DigitalProducts, #Tech"
-      : "#Community, #Growth, #Social"
+    brandKit?.defaultHashtags ||
+      (isMeetSoni
+        ? "#AveroInnovations, #DigitalProducts, #Tech"
+        : "#Community, #Growth, #Social")
   );
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
-    onBusinessNameChange(business);
-    toast.success("Settings saved");
+  // Delete modal state
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    setBusiness(businessName);
+    setTagline(brandKit?.tagline || "");
+    setTimezone(brandKit?.timezone || "Asia/Kolkata");
+    setTone(brandKit?.tone || "Friendly");
+    setHashtags(brandKit?.defaultHashtags || "");
+  }, [businessName, brandKit?.tagline, brandKit?.timezone, brandKit?.tone, brandKit?.defaultHashtags]);
+
+  const handleSave = async () => {
+    if (!business.trim()) {
+      toast.error("Business name cannot be empty");
+      return;
+    }
+    setSaving(true);
+    try {
+      if (activeBusinessId) {
+        await updateBusiness({
+          data: {
+            business_id: activeBusinessId,
+            name: business.trim(),
+            tagline: tagline.trim(),
+            timezone,
+            tone: tone as any,
+            default_hashtags: hashtags.trim() || null,
+          },
+        });
+      }
+      onBusinessNameChange(business.trim());
+      onRefresh?.();
+      toast.success("Workspace settings saved");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  return <><ScreenTitle eyebrow="MAKE IT YOURS" title="Settings" description="A few useful defaults to make your next post easier." action={<Button onClick={handleSave} className="gap-2"><Check className="h-4 w-4" /> Save settings</Button>} /><div className="max-w-2xl divide-y border-y"><section className="py-6"><h2 className="font-display text-2xl">Business details</h2><div className="mt-4 grid gap-4 sm:grid-cols-2"><LabeledInput label="Business name" value={business} onChange={setBusiness} /><label className="text-xs font-medium">Timezone<select className="mt-2 flex h-9 w-full border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" value={timezone} onChange={(event) => setTimezone(event.target.value)}><option value="Asia/Kolkata">India (IST)</option><option value="Europe/Stockholm">Stockholm (CEST)</option><option value="America/New_York">New York (EDT)</option><option value="Europe/London">London (BST)</option></select></label></div></section><section className="py-6"><h2 className="font-display text-2xl">Caption preferences</h2><p className="mt-1 text-xs text-muted-foreground">Pick the tone that sounds most like your business.</p><div className="mt-4 flex flex-wrap gap-2">{["Friendly", "Premium", "Playful", "Direct"].map((item) => <Button key={item} variant={tone === item ? "secondary" : "outline"} size="sm" className={tone === item ? "border-primary/30 text-primary" : "font-normal"} onClick={() => setTone(item)} aria-pressed={tone === item}>{item}</Button>)}</div><label className="mt-5 block text-xs font-medium">Default hashtags<Textarea className="mt-2 min-h-20 text-sm font-normal" value={hashtags} onChange={(event) => setHashtags(event.target.value)} /></label></section></div></>;
+  const scheduledCount = posts.filter((p) => p.status === "Scheduled").length;
+  const canDelete = businesses.length > 1;
+
+  const handleConfirmDelete = async () => {
+    if (!activeBusinessId) return;
+    setDeleting(true);
+    try {
+      await onDeleteBusiness?.(activeBusinessId);
+      setDeleteModalOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <>
+      <ScreenTitle
+        eyebrow="WORKSPACE PREFERENCES"
+        title="Settings"
+        description={`Configure details, posting schedule timezone, and caption defaults for ${businessName}.`}
+        action={
+          <Button onClick={handleSave} disabled={saving} className="gap-2">
+            {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            Save settings
+          </Button>
+        }
+      />
+      <div className="max-w-2xl divide-y border-y">
+        <section className="py-6">
+          <h2 className="font-display text-2xl">Business details</h2>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <LabeledInput label="Business name" value={business} onChange={setBusiness} />
+            <LabeledInput label="Tagline" value={tagline} onChange={setTagline} />
+            <div className="sm:col-span-2">
+              <label className="text-xs font-medium">
+                Posting Timezone
+                <select
+                  className="mt-2 flex h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  value={timezone}
+                  onChange={(event) => setTimezone(event.target.value)}
+                >
+                  <option value="Asia/Kolkata">India (IST - UTC+5:30)</option>
+                  <option value="Europe/Stockholm">Stockholm (CEST - UTC+2)</option>
+                  <option value="America/New_York">New York (EDT - UTC-4)</option>
+                  <option value="Europe/London">London (BST - UTC+1)</option>
+                  <option value="America/Los_Angeles">Pacific (PDT - UTC-7)</option>
+                  <option value="Asia/Dubai">Dubai (GST - UTC+4)</option>
+                </select>
+              </label>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                All scheduled posts for this business will release according to this timezone.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="py-6">
+          <h2 className="font-display text-2xl">Caption preferences</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Pick the tone that sounds most like {businessName}.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {["Friendly", "Professional", "Bold", "Playful", "Casual", "Luxury"].map((item) => (
+              <Button
+                key={item}
+                variant={tone === item ? "secondary" : "outline"}
+                size="sm"
+                className={tone === item ? "border-primary/30 text-primary" : "font-normal"}
+                onClick={() => setTone(item)}
+                aria-pressed={tone === item}
+              >
+                {item}
+              </Button>
+            ))}
+          </div>
+          <label className="mt-5 block text-xs font-medium">
+            Default hashtags
+            <Textarea
+              className="mt-2 min-h-20 text-sm font-normal"
+              value={hashtags}
+              onChange={(event) => setHashtags(event.target.value)}
+              placeholder="#Brand, #Community, #Launch"
+            />
+          </label>
+        </section>
+
+        {/* Danger Zone: Delete Business */}
+        <section className="py-6">
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-5">
+            <h3 className="font-display text-lg font-semibold text-destructive">Danger Zone</h3>
+            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+              Deleting a workspace will remove all its flyers, drafts, and disconnect any linked Instagram accounts.
+            </p>
+            {scheduledCount > 0 && (
+              <p className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+                ⚠️ Notice: {scheduledCount} scheduled post(s) currently queued for this workspace.
+              </p>
+            )}
+            <div className="mt-4">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setDeleteModalOpen(true)}
+                disabled={!canDelete}
+              >
+                Delete {businessName}
+              </Button>
+              {!canDelete && (
+                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                  You cannot delete your only workspace. Add another business first.
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display text-2xl text-destructive">
+              Delete "{businessName}"?
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to permanently delete this workspace?
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2 text-xs text-muted-foreground">
+            {scheduledCount > 0 ? (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-destructive font-medium leading-relaxed">
+                ⚠️ Warning: There are {scheduledCount} scheduled post(s) queued. Deleting this workspace will cancel them immediately.
+              </div>
+            ) : (
+              <p>This action cannot be undone. Its brand assets and accounts will be unlinked.</p>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDeleteModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleting}
+              onClick={handleConfirmDelete}
+              className="gap-2"
+            >
+              {deleting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+              Confirm & Delete Business
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 function GoogleIcon({ className = "h-4 w-4" }: { className?: string }) {

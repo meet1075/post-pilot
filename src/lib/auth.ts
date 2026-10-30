@@ -14,10 +14,10 @@
  */
 
 import { SignJWT, jwtVerify } from "jose";
-import { randomBytes, createHash, createCipheriv, createDecipheriv } from "crypto";
+import { randomBytes, createHash, createCipheriv, createDecipheriv, createHmac } from "crypto";
 import { getRequest } from "@tanstack/react-start/server";
 import { query, queryOne } from "./db.js";
-import { UnauthorizedError, AppError } from "./errors.js";
+import { UnauthorizedError, ForbiddenError, AppError } from "./errors.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -206,25 +206,51 @@ export async function requireAuth(request?: Request): Promise<SessionUser> {
         const user = betterSession.user;
         let businessId: string | undefined;
 
-        try {
-          let business = await queryOne<{ id: string; name: string }>`
-            SELECT id, name FROM businesses
-            WHERE owner_id = ${user.id} AND deleted_at IS NULL
-            ORDER BY created_at ASC
-            LIMIT 1
-          `;
+        // Check for requested business via header or cookie
+        const reqBizHeader = headersObj.get("x-business-id");
+        let reqBizCookie: string | undefined;
+        const cookieHeader = headersObj.get("cookie");
+        if (cookieHeader) {
+          const match = cookieHeader.match(/postpilot_active_business=([^;]+)/);
+          if (match && match[1]) reqBizCookie = decodeURIComponent(match[1]);
+        }
+        const candidateBizId = reqBizHeader || reqBizCookie;
 
-          if (!business) {
-            const defaultName = user.name ? `${user.name}'s Workspace` : "My Business";
-            business = await queryOne<{ id: string; name: string }>`
-              INSERT INTO businesses (owner_id, name, business_type, location)
-              VALUES (${user.id}, ${defaultName}, 'General', 'Global')
-              RETURNING id, name
+        try {
+          if (candidateBizId) {
+            const biz = await queryOne<{ id: string; name: string }>`
+              SELECT id, name FROM businesses
+              WHERE id = ${candidateBizId}
+                AND (owner_id = ${user.id} OR owner_user_id = ${user.id})
+                AND deleted_at IS NULL
+              LIMIT 1
             `;
+            if (biz?.id) {
+              businessId = biz.id;
+            }
           }
 
-          if (business?.id) {
-            businessId = business.id;
+          if (!businessId) {
+            let business = await queryOne<{ id: string; name: string }>`
+              SELECT id, name FROM businesses
+              WHERE (owner_id = ${user.id} OR owner_user_id = ${user.id})
+                AND deleted_at IS NULL
+              ORDER BY created_at ASC
+              LIMIT 1
+            `;
+
+            if (!business) {
+              const defaultName = user.name ? `${user.name}'s Workspace` : "My Business";
+              business = await queryOne<{ id: string; name: string }>`
+                INSERT INTO businesses (owner_id, owner_user_id, name, business_type, location, timezone)
+                VALUES (${user.id}, ${user.id}, ${defaultName}, 'General', 'Global', 'UTC')
+                RETURNING id, name
+              `;
+            }
+
+            if (business?.id) {
+              businessId = business.id;
+            }
           }
         } catch (dbErr) {
           console.warn("[requireAuth] Failed to load or initialize business for user:", dbErr);
@@ -251,6 +277,93 @@ export async function requireAuth(request?: Request): Promise<SessionUser> {
   }
   const token = authHeader.slice(7);
   return verifySessionToken(token);
+}
+
+// ─── Business Ownership & Security Helpers ────────────────────────────────────
+
+export interface BusinessRowData {
+  id: string;
+  owner_id: string;
+  owner_user_id: string | null;
+  name: string;
+  tagline: string | null;
+  logo_url: string | null;
+  brand_colors: string[] | null;
+  tone: string | null;
+  default_hashtags: string | null;
+  timezone: string;
+  location: string | null;
+  phone: string | null;
+  zernio_profile_id: string | null;
+  business_type: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Asserts that a given user ID owns or has access to the given business ID.
+ * Throws ForbiddenError if user does not own it.
+ */
+export async function assertUserOwnsBusiness(userId: string, businessId: string): Promise<BusinessRowData> {
+  const business = await queryOne<BusinessRowData>`
+    SELECT * FROM businesses
+    WHERE id = ${businessId}
+      AND (owner_id = ${userId} OR owner_user_id = ${userId})
+      AND deleted_at IS NULL
+  `;
+  if (!business) {
+    throw new ForbiddenError("You do not have access to this business.");
+  }
+  return business;
+}
+
+// ─── Signed OAuth State (HMAC SHA-256) ─────────────────────────────────────────
+
+export interface SignedOAuthPayload {
+  businessId: string;
+  userId: string;
+  timestamp: number;
+}
+
+export function signOAuthState(data: { businessId: string; userId: string; timestamp?: number }): string {
+  const payload: SignedOAuthPayload = {
+    businessId: data.businessId,
+    userId: data.userId,
+    timestamp: data.timestamp ?? Date.now(),
+  };
+  const jsonStr = JSON.stringify(payload);
+  const base64 = Buffer.from(jsonStr, "utf8").toString("base64url");
+  const secret = process.env["JWT_SECRET"] || "postpilot-hmac-secret-32-chars-minimum-key!!";
+  const sig = createHmac("sha256", secret).update(base64).digest("base64url");
+  return `${base64}.${sig}`;
+}
+
+export function verifyOAuthState(stateString: string): SignedOAuthPayload {
+  if (!stateString || typeof stateString !== "string" || !stateString.includes(".")) {
+    throw new AppError("Invalid or missing OAuth state parameter", 400);
+  }
+  const [base64, sig] = stateString.split(".");
+  if (!base64 || !sig) {
+    throw new AppError("Malformed OAuth state parameter", 400);
+  }
+  const secret = process.env["JWT_SECRET"] || "postpilot-hmac-secret-32-chars-minimum-key!!";
+  const expectedSig = createHmac("sha256", secret).update(base64).digest("base64url");
+  if (sig !== expectedSig) {
+    throw new ForbiddenError("Tampered OAuth state signature. Connection rejected.");
+  }
+  try {
+    const raw = Buffer.from(base64, "base64url").toString("utf8");
+    const data = JSON.parse(raw) as SignedOAuthPayload;
+    // Check expiration (max 2 hours)
+    if (Date.now() - (data.timestamp || 0) > 2 * 60 * 60 * 1000) {
+      throw new AppError("OAuth state has expired. Please initiate connection again.", 400);
+    }
+    return data;
+  } catch (err: any) {
+    if (err instanceof AppError) throw err;
+    throw new AppError("Failed to parse OAuth state payload", 400);
+  }
 }
 
 // ─── Token encryption (for OAuth access tokens at rest) ─────────────────────

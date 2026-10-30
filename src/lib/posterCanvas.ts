@@ -18,6 +18,7 @@ export interface RenderPosterOptions {
   imageUrl?: string | undefined;
   logoUrl?: string | undefined;
   font?: string | undefined;
+  format?: string | undefined;
 }
 
 const THEME_COLORS: Record<string, { bg: string; text: string; accent: string }> = {
@@ -31,7 +32,11 @@ const THEME_COLORS: Record<string, { bg: string; text: string; accent: string }>
 
 export async function renderPosterCanvas(opts: RenderPosterOptions): Promise<string> {
   const width = 1080;
-  const height = 1350;
+  const height = opts.format === "Square"
+    ? 1080
+    : opts.format === "Story"
+    ? 1920
+    : 1350;
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -58,6 +63,7 @@ export async function renderPosterCanvas(opts: RenderPosterOptions): Promise<str
         bgImg.onerror = () => resolve();
         bgImg.src = opts.imageUrl!;
       });
+
       return canvas.toDataURL("image/png");
     } catch {
       // Fall through to typographic layout if image load fails

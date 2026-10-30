@@ -13,7 +13,7 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
-import { requireAuth } from "../lib/auth.js";
+import { requireAuth, assertUserOwnsBusiness } from "../lib/auth.js";
 import { query, queryOne } from "../lib/db.js";
 import { checkRateLimit, getClientIp } from "../lib/rateLimit.js";
 import { suggestCaptionsSchema } from "../lib/validators.js";
@@ -49,25 +49,31 @@ export const suggestCaptions = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     try {
       const session = await requireAuth();
-      if (!session.businessId) throw new ForbiddenError("No active business");
-
-      const ip = getClientIp();
-      await checkRateLimit(`user:${session.userId}`, "ai");
 
       const parsed = suggestCaptionsSchema.safeParse(data);
       if (!parsed.success) {
         throw new ValidationError("Validation failed", formatZodIssues(parsed.error.issues));
       }
 
+      const targetBusinessId = parsed.data.business_id || session.businessId;
+      if (!targetBusinessId) throw new ForbiddenError("No active business selected");
+
+      // Verify user owns business
+      const business = await assertUserOwnsBusiness(session.userId, targetBusinessId);
+
+      const ip = getClientIp();
+      await checkRateLimit(`user:${session.userId}`, "ai");
+
       const { headline, offer: reqOffer, price, platform, tone: reqTone, business_name: reqBiz } = parsed.data;
 
-      // Fetch brand kit + business context
+      // Fetch brand kit + business context for selected business
       const context = await queryOne<BrandKitRow & BusinessRow>`
-        SELECT bk.caption_tone, bk.default_hashtags,
+        SELECT COALESCE(b.tone, bk.caption_tone, 'Friendly') as caption_tone,
+               COALESCE(b.default_hashtags, bk.default_hashtags, '') as default_hashtags,
                b.name, b.business_type, b.location
         FROM businesses b
         LEFT JOIN brand_kits bk ON bk.business_id = b.id
-        WHERE b.id = ${session.businessId}
+        WHERE b.id = ${business.id}
       `;
 
       const tone = reqTone ?? context?.caption_tone ?? "Friendly";

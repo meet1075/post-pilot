@@ -23,6 +23,7 @@ function ZernioCallbackPage() {
     const platform = connectedParam
       ? connectedParam.charAt(0).toUpperCase() + connectedParam.slice(1).toLowerCase()
       : "Instagram";
+    const state = params.get("state") || undefined;
     const accountId = params.get("accountId") || params.get("account_id");
     const handle = params.get("username") || params.get("handle") || "connected";
     const error = params.get("error") || params.get("error_description");
@@ -42,12 +43,13 @@ function ZernioCallbackPage() {
 
     setAccountHandle(handle);
 
-    // Save connected account to DB
+    // Save connected account to DB with signed state
     connectAccount({
       data: {
         platform,
         platform_handle: handle.replace(/^@/, ""),
         zernio_account_id: accountId,
+        state,
       },
     })
       .then((res: any) => {

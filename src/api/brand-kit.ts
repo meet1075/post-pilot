@@ -9,7 +9,7 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
-import { requireAuth } from "../lib/auth.js";
+import { requireAuth, assertUserOwnsBusiness } from "../lib/auth.js";
 import { query, queryOne } from "../lib/db.js";
 import { checkRateLimit, getClientIp } from "../lib/rateLimit.js";
 import { updateBrandKitSchema } from "../lib/validators.js";
@@ -36,32 +36,35 @@ interface BrandKitRow {
 
 // ─── getBrandKit ──────────────────────────────────────────────────────────────
 
-export const getBrandKit = createServerFn({ method: "GET" }).handler(
-  async () => {
+export const getBrandKit = createServerFn({ method: "GET" })
+  .validator((d?: { businessId?: string }) => d)
+  .handler(async ({ data }) => {
     try {
       const session = await requireAuth();
-      if (!session.businessId) throw new ForbiddenError("No active business");
+      const targetBusinessId = data?.businessId || session.businessId;
+      if (!targetBusinessId) throw new ForbiddenError("No active business selected");
 
       const ip = getClientIp();
       await checkRateLimit(ip, "general");
 
+      await assertUserOwnsBusiness(session.userId, targetBusinessId);
+
       let kit = await queryOne<BrandKitRow>`
-        SELECT * FROM brand_kits WHERE business_id = ${session.businessId}
+        SELECT * FROM brand_kits WHERE business_id = ${targetBusinessId}
       `;
 
       // Auto-create a default brand kit if none exists
       if (!kit) {
         const [created] = await query<BrandKitRow>`
           INSERT INTO brand_kits (business_id)
-          VALUES (${session.businessId})
+          VALUES (${targetBusinessId})
           ON CONFLICT (business_id) DO NOTHING
           RETURNING *
         `;
         kit = created ?? null;
-        // If INSERT hit the conflict, re-fetch
         if (!kit) {
           kit = await queryOne<BrandKitRow>`
-            SELECT * FROM brand_kits WHERE business_id = ${session.businessId}
+            SELECT * FROM brand_kits WHERE business_id = ${targetBusinessId}
           `;
         }
       }
@@ -73,8 +76,7 @@ export const getBrandKit = createServerFn({ method: "GET" }).handler(
       const { error, status } = errorToResponse(err);
       return { success: false, error, status, kit: null };
     }
-  }
-);
+  });
 
 // ─── updateBrandKit ───────────────────────────────────────────────────────────
 
@@ -83,10 +85,13 @@ export const updateBrandKit = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     try {
       const session = await requireAuth();
-      if (!session.businessId) throw new ForbiddenError("No active business");
+      const targetBusinessId = (data as any)?.businessId || (data as any)?.business_id || session.businessId;
+      if (!targetBusinessId) throw new ForbiddenError("No active business selected");
 
       const ip = getClientIp();
       await checkRateLimit(ip, "general");
+
+      await assertUserOwnsBusiness(session.userId, targetBusinessId);
 
       const parsed = updateBrandKitSchema.safeParse(data);
       if (!parsed.success) {
@@ -104,18 +109,37 @@ export const updateBrandKit = createServerFn({ method: "POST" })
       const [kit] = await query<BrandKitRow>`
         INSERT INTO brand_kits (business_id, colors, font, caption_tone, default_hashtags)
         VALUES (
-          ${session.businessId},
-          ${d.colors ?? ["Tomato"]},
+          ${targetBusinessId},
+          ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(d.colors && d.colors.length > 0 ? d.colors : ["Tomato", "Olive"])}::jsonb)),
           ${d.font ?? "Fraunces"},
           ${d.caption_tone ?? "Friendly"},
           ${d.default_hashtags ?? ""}
         )
         ON CONFLICT (business_id) DO UPDATE SET
-          colors           = COALESCE(${d.colors ?? null}, brand_kits.colors),
+          colors           = CASE
+                               WHEN ${Boolean(d.colors && d.colors.length > 0)}
+                               THEN ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(d.colors || [])}::jsonb))
+                               ELSE brand_kits.colors
+                             END,
           font             = COALESCE(${d.font ?? null}, brand_kits.font),
           caption_tone     = COALESCE(${d.caption_tone ?? null}, brand_kits.caption_tone),
-          default_hashtags = COALESCE(${d.default_hashtags ?? null}, brand_kits.default_hashtags)
+          default_hashtags = COALESCE(${d.default_hashtags ?? null}, brand_kits.default_hashtags),
+          updated_at       = now()
         RETURNING *
+      `;
+
+      // Keep businesses table in sync
+      await query`
+        UPDATE businesses SET
+          brand_colors     = CASE
+                               WHEN ${Boolean(d.colors && d.colors.length > 0)}
+                               THEN ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(d.colors || [])}::jsonb))
+                               ELSE brand_colors
+                             END,
+          tone             = COALESCE(${d.caption_tone ?? null}, tone),
+          default_hashtags = COALESCE(${d.default_hashtags ?? null}, default_hashtags),
+          updated_at       = now()
+        WHERE id = ${targetBusinessId}
       `;
 
       return { success: true, kit };
@@ -153,13 +177,13 @@ export const getLogoUploadUrl = createServerFn({ method: "POST" })
 // ─── uploadBrandLogo ──────────────────────────────────────────────────────────
 
 export const uploadBrandLogo = createServerFn({ method: "POST" })
-  .validator((d: { dataUrl: string; filename?: string }) => d)
+  .validator((d: { dataUrl: string; filename?: string; businessId?: string }) => d)
   .handler(async ({ data }) => {
     try {
-      let businessId = "general";
+      let businessId = data.businessId || "general";
       try {
         const session = await requireAuth();
-        if (session.businessId) businessId = session.businessId;
+        if (session.businessId && !data.businessId) businessId = session.businessId;
       } catch {
         // Fallback for workspace without active auth session
       }
@@ -184,6 +208,11 @@ export const uploadBrandLogo = createServerFn({ method: "POST" })
             UPDATE brand_kits
             SET logo_r2_key = ${key}, logo_public_url = ${publicUrl}
             WHERE business_id = ${businessId}
+          `;
+          await query`
+            UPDATE businesses
+            SET logo_url = ${publicUrl}
+            WHERE id = ${businessId}
           `;
         } catch (dbErr) {
           console.warn("[uploadBrandLogo] DB update warning:", dbErr);

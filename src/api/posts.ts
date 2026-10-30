@@ -1,20 +1,12 @@
 /**
  * PostPilot — Posts API (TanStack Server Functions)
  *
- * CRUD operations for social posts.
- * All endpoints require authentication.
- *
- * Endpoints:
- *  - getPosts()          → list all posts for the current business
- *  - getPost(id)         → get a single post
- *  - createPost(data)    → create a draft post
- *  - updatePost(id,data) → update post fields
- *  - deletePost(id)      → soft-delete a post
+ * CRUD operations for social posts scoped by business workspace.
+ * All endpoints enforce server-side business ownership.
  */
 
 import { createServerFn } from "@tanstack/react-start";
-
-import { requireAuth } from "../lib/auth.js";
+import { requireAuth, assertUserOwnsBusiness } from "../lib/auth.js";
 import { query, queryOne } from "../lib/db.js";
 import { checkRateLimit, getClientIp } from "../lib/rateLimit.js";
 import {
@@ -36,6 +28,7 @@ import { apiSuccess, formatZodIssues } from "../lib/apiResponse.js";
 export interface PostRow {
   id: string;
   business_id: string;
+  social_account_id: string | null;
   headline: string;
   caption: string;
   prompt: string;
@@ -57,14 +50,18 @@ export interface PostRow {
 // ─── getPosts ─────────────────────────────────────────────────────────────────
 
 export const getPosts = createServerFn({ method: "GET" })
-  .validator((d?: { status?: string }) => d)
+  .validator((d?: { status?: string; businessId?: string }) => d)
   .handler(async ({ data }) => {
     try {
       const session = await requireAuth();
-      if (!session.businessId) return { success: true, posts: [] };
+      const targetBusinessId = data?.businessId || session.businessId;
+      if (!targetBusinessId) return apiSuccess({ posts: [] }, "No active business");
 
       const ip = getClientIp();
       await checkRateLimit(ip, "general");
+
+      // Enforce business ownership
+      await assertUserOwnsBusiness(session.userId, targetBusinessId);
 
       // Optional status filter
       const status = data?.status;
@@ -72,14 +69,14 @@ export const getPosts = createServerFn({ method: "GET" })
       const posts = status
         ? await query<PostRow>`
             SELECT
-              id, business_id, headline, caption,
+              id, business_id, social_account_id, headline, caption,
               date::text as date,
               time::text as time,
               status, platform, theme, price, image_url,
               zernio_post_id, published_at, error_message,
               created_at, updated_at
             FROM posts
-            WHERE business_id = ${session.businessId}
+            WHERE business_id = ${targetBusinessId}
               AND status = ${status}
               AND deleted_at IS NULL
             ORDER BY
@@ -88,14 +85,14 @@ export const getPosts = createServerFn({ method: "GET" })
           `
         : await query<PostRow>`
             SELECT
-              id, business_id, headline, caption,
+              id, business_id, social_account_id, headline, caption,
               date::text as date,
               time::text as time,
               status, platform, theme, price, image_url,
               zernio_post_id, published_at, error_message,
               created_at, updated_at
             FROM posts
-            WHERE business_id = ${session.businessId}
+            WHERE business_id = ${targetBusinessId}
               AND deleted_at IS NULL
             ORDER BY created_at DESC
             LIMIT 200
@@ -122,7 +119,7 @@ export const getPosts = createServerFn({ method: "GET" })
         }
       }
 
-      log.db("Neon", "Loaded posts from database", { count: posts.length, filter: status || "all" });
+      log.db("Neon", "Loaded posts from database", { count: posts.length, filter: status || "all", businessId: targetBusinessId });
 
       return apiSuccess({ posts }, "Posts retrieved successfully");
     } catch (err) {
@@ -151,7 +148,8 @@ export const getPost = createServerFn({ method: "GET" })
       `;
 
       if (!post) throw new NotFoundError("Post");
-      if (post.business_id !== session.businessId) throw new ForbiddenError();
+      // Assert ownership of the business this post belongs to
+      await assertUserOwnsBusiness(session.userId, post.business_id);
 
       return apiSuccess({ post }, "Post retrieved successfully");
     } catch (err) {
@@ -166,7 +164,6 @@ export const createPost = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     try {
       const session = await requireAuth();
-      if (!session.businessId) throw new ForbiddenError("No active business");
 
       const ip = getClientIp();
       await checkRateLimit(ip, "general");
@@ -177,13 +174,19 @@ export const createPost = createServerFn({ method: "POST" })
       }
 
       const d = parsed.data;
+      const targetBusinessId = d.business_id || session.businessId;
+      if (!targetBusinessId) throw new ForbiddenError("No active business workspace selected");
+
+      // Enforce ownership
+      await assertUserOwnsBusiness(session.userId, targetBusinessId);
 
       const [post] = await query<PostRow>`
         INSERT INTO posts (
-          business_id, headline, caption, prompt,
+          business_id, social_account_id, headline, caption, prompt,
           date, time, status, platform, theme, price, image_url
         ) VALUES (
-          ${session.businessId},
+          ${targetBusinessId},
+          ${d.social_account_id ?? null},
           ${d.headline},
           ${d.caption},
           ${d.prompt},
@@ -198,7 +201,12 @@ export const createPost = createServerFn({ method: "POST" })
         RETURNING *
       `;
 
-      log.db("Neon", "Created post in database", { id: post?.id, headline: post?.headline, status: post?.status, imageUrl: post?.image_url ?? undefined });
+      log.db("Neon", "Created post in database", {
+        id: post?.id,
+        businessId: targetBusinessId,
+        headline: post?.headline,
+        status: post?.status,
+      });
 
       return apiSuccess({ post }, "Post created successfully", 201);
     } catch (err) {
@@ -224,7 +232,7 @@ export const updatePost = createServerFn({ method: "POST" })
         SELECT * FROM posts WHERE id = ${id} AND deleted_at IS NULL
       `;
       if (!existing) throw new NotFoundError("Post");
-      if (existing.business_id !== session.businessId) throw new ForbiddenError();
+      await assertUserOwnsBusiness(session.userId, existing.business_id);
 
       const parsed = updatePostSchema.safeParse(rest);
       if (!parsed.success) throw new ValidationError("Validation failed", formatZodIssues(parsed.error.issues));
@@ -233,17 +241,19 @@ export const updatePost = createServerFn({ method: "POST" })
 
       const [post] = await query<PostRow>`
         UPDATE posts SET
-          headline      = COALESCE(${d.headline ?? null}, headline),
-          caption       = COALESCE(${d.caption ?? null}, caption),
-          prompt        = COALESCE(${d.prompt ?? null}, prompt),
-          date          = COALESCE(${d.date ?? null}, date),
-          time          = COALESCE(${d.time ?? null}, time),
-          status        = COALESCE(${d.status ?? null}, status),
-          platform      = COALESCE(${d.platform ?? null}, platform),
-          theme         = COALESCE(${d.theme ?? null}, theme),
-          price         = COALESCE(${d.price ?? null}, price),
-          image_url     = COALESCE(${d.image_url ?? null}, image_url),
-          image_r2_key  = COALESCE(${d.image_r2_key ?? null}, image_r2_key)
+          headline          = COALESCE(${d.headline ?? null}, headline),
+          caption           = COALESCE(${d.caption ?? null}, caption),
+          prompt            = COALESCE(${d.prompt ?? null}, prompt),
+          date              = COALESCE(${d.date ?? null}, date),
+          time              = COALESCE(${d.time ?? null}, time),
+          status            = COALESCE(${d.status ?? null}, status),
+          platform          = COALESCE(${d.platform ?? null}, platform),
+          theme             = COALESCE(${d.theme ?? null}, theme),
+          price             = COALESCE(${d.price ?? null}, price),
+          image_url         = COALESCE(${d.image_url ?? null}, image_url),
+          image_r2_key      = COALESCE(${d.image_r2_key ?? null}, image_r2_key),
+          social_account_id = COALESCE(${d.social_account_id ?? null}, social_account_id),
+          updated_at        = now()
         WHERE id = ${id}
         RETURNING *
       `;
@@ -271,7 +281,7 @@ export const deletePost = createServerFn({ method: "POST" })
         SELECT * FROM posts WHERE id = ${id} AND deleted_at IS NULL
       `;
       if (!existing) throw new NotFoundError("Post");
-      if (existing.business_id !== session.businessId) throw new ForbiddenError();
+      await assertUserOwnsBusiness(session.userId, existing.business_id);
 
       await query`
         UPDATE posts SET deleted_at = now() WHERE id = ${id}

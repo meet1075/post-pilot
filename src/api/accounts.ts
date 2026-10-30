@@ -1,18 +1,18 @@
 /**
  * PostPilot — Accounts API (TanStack Server Functions)
  *
- * Manages connected social media accounts (Instagram, Facebook, X).
- * Uses Zernio for actual OAuth; we store the zernio_account_id + handle.
+ * Manages connected social media accounts per business (Instagram, Facebook, X).
+ * Uses Zernio for actual OAuth; stores external_account_id + username in social_accounts.
  *
  * Endpoints:
- *  - getAccounts()                   → list all connected accounts
- *  - connectAccount(data)            → record a newly-connected account (post-Zernio OAuth)
- *  - disconnectAccount(platform)     → soft-delete a connected account
- *  - getZernioConnectUrl(platform)   → get the Zernio OAuth URL for connecting
+ *  - getAccounts(businessId?)          → list all connected accounts for the business + user billing notice
+ *  - getZernioConnectUrl(data)         → get signed OAuth connect URL isolated to business's profile
+ *  - connectAccount(data)              → verify signed state, prevent cross-business duplication, register account
+ *  - disconnectAccount(data)           → disconnect specific account or platform
  */
 
 import { createServerFn } from "@tanstack/react-start";
-import { requireAuth } from "../lib/auth.js";
+import { requireAuth, assertUserOwnsBusiness, signOAuthState, verifyOAuthState } from "../lib/auth.js";
 import { query, queryOne } from "../lib/db.js";
 import { checkRateLimit, getClientIp } from "../lib/rateLimit.js";
 import { connectAccountSchema } from "../lib/validators.js";
@@ -25,66 +25,105 @@ import {
 import { apiSuccess, formatZodIssues } from "../lib/apiResponse.js";
 import Zernio from "@zernio/node";
 
-interface ConnectedAccountRow {
+export interface SocialAccountItem {
   id: string;
   business_id: string;
   platform: string;
-  platform_user_id: string | null;
-  platform_handle: string | null;
-  zernio_account_id: string | null;
-  status: string;
+  external_account_id: string;
+  username: string;
+  status: "connected" | "expired" | "disconnected";
   connected_at: string;
   updated_at: string;
 }
 
 // ─── getAccounts ──────────────────────────────────────────────────────────────
 
-export const getAccounts = createServerFn({ method: "GET" }).handler(
-  async () => {
+export const getAccounts = createServerFn({ method: "GET" })
+  .validator((d?: { businessId?: string }) => d)
+  .handler(async ({ data }) => {
     try {
       const session = await requireAuth();
-      if (!session.businessId) {
-        return { success: true, accounts: [], businessName: "My Workspace", email: session.email };
+      const targetBusinessId = data?.businessId || session.businessId;
+
+      if (!targetBusinessId) {
+        return apiSuccess({
+          accounts: [],
+          businessName: "My Workspace",
+          email: session.email,
+          totalConnectedAccounts: 0,
+          billing: {
+            freeTierLimit: 2,
+            isFreeTier: true,
+            notice: "Free Tier: 2 connected accounts included. Additional accounts billed at $6/account/mo.",
+          },
+        }, "No active business");
       }
 
       const ip = getClientIp();
       await checkRateLimit(ip, "general");
 
-      const business = await queryOne<{ id: string; name: string }>`
-        SELECT id, name FROM businesses WHERE id = ${session.businessId}
-      `;
+      const business = await assertUserOwnsBusiness(session.userId, targetBusinessId);
 
-      const accounts = await query<ConnectedAccountRow>`
-        SELECT id, business_id, platform, platform_user_id, platform_handle,
-               zernio_account_id, status, connected_at, updated_at
-        FROM connected_accounts
-        WHERE business_id = ${session.businessId}
+      // Fetch accounts for this business from social_accounts
+      const accounts = await query<SocialAccountItem>`
+        SELECT
+          id, business_id, platform, external_account_id, username,
+          status, connected_at, updated_at
+        FROM social_accounts
+        WHERE business_id = ${business.id}
           AND deleted_at IS NULL
         ORDER BY connected_at ASC
       `;
 
+      // Also calculate total connected accounts across ALL businesses owned by this user
+      const [userTotals] = await query<{ total_count: string }>`
+        SELECT COUNT(sa.id) as total_count
+        FROM social_accounts sa
+        JOIN businesses b ON b.id = sa.business_id
+        WHERE (b.owner_id = ${session.userId} OR b.owner_user_id = ${session.userId})
+          AND sa.status = 'connected'
+          AND sa.deleted_at IS NULL
+          AND b.deleted_at IS NULL
+      `;
+
+      const totalConnected = parseInt(userTotals?.total_count || "0", 10);
+      const isFreeTier = totalConnected <= 2;
+      const billingNotice = isFreeTier
+        ? `Zernio Free Tier: ${totalConnected}/2 connected accounts used. Next accounts billed at $6/account/mo.`
+        : `Active billing: ${totalConnected} connected accounts across workspaces ($6/mo per account after first 2 free).`;
+
       return apiSuccess({
         accounts,
-        businessName: business?.name ?? "My Workspace",
+        businessId: business.id,
+        businessName: business.name,
         email: session.email,
+        totalConnectedAccounts: totalConnected,
+        billing: {
+          freeTierLimit: 2,
+          totalAccounts: totalConnected,
+          isFreeTier,
+          notice: billingNotice,
+        },
       }, "Connected accounts retrieved successfully");
     } catch (err) {
       return errorToResponse(err);
     }
-  }
-);
+  });
 
 // ─── getZernioConnectUrl ──────────────────────────────────────────────────────
 
 export const getZernioConnectUrl = createServerFn({ method: "GET" })
-  .validator((d?: { platform?: string }) => d)
+  .validator((d?: { platform?: string; businessId?: string }) => d)
   .handler(async ({ data }) => {
     try {
       const session = await requireAuth();
-      if (!session.businessId) throw new ForbiddenError("No active business");
+      const targetBusinessId = data?.businessId || session.businessId;
+      if (!targetBusinessId) throw new ForbiddenError("No active business");
 
       const ip = getClientIp();
       await checkRateLimit(ip, "general");
+
+      const business = await assertUserOwnsBusiness(session.userId, targetBusinessId);
 
       const platform = data?.platform || "Instagram";
       const normalizedPlatform = platform.toLowerCase();
@@ -92,34 +131,61 @@ export const getZernioConnectUrl = createServerFn({ method: "GET" })
       if (!zernioKey) throw new ValidationError("ZERNIO_API_KEY is not configured");
 
       const appUrl = process.env["PUBLIC_APP_URL"] ?? "http://localhost:8080";
-      const redirectUri = `${appUrl}/auth/zernio-callback`;
-
       const zernio = new Zernio({ apiKey: zernioKey });
 
-      // Create or reuse an isolated profile per business so users don't share Avero's profile
-      let profileId = "6ad323c1906cf34fba1f8939";
-      try {
-        const profilesRes = await zernio.profiles.listProfiles();
-        const profileName = `Workspace-${session.businessId.slice(0, 8)}`;
-        const existing = profilesRes?.data?.profiles?.find(
-          (p: any) => p.name === profileName || p.name === session.businessId
-        );
-        if (existing?._id) {
-          profileId = existing._id;
-        } else {
+      // Ensure business has an isolated Zernio profile
+      let profileId = business.zernio_profile_id;
+      if (!profileId) {
+        try {
+          const profileName = `Biz-${business.name.slice(0, 15).replace(/[^a-zA-Z0-9]/g, "")}-${business.id.slice(0, 6)}`;
           const created = await zernio.profiles.createProfile({
             body: { name: profileName },
           });
           if (created?.data?.profile?._id) {
             profileId = created.data.profile._id;
+            await query`
+              UPDATE businesses
+              SET zernio_profile_id = ${profileId}
+              WHERE id = ${business.id}
+            `;
+          }
+        } catch (profileErr) {
+          console.warn("[getZernioConnectUrl] Profile setup error:", profileErr);
+          // If profile creation failed (e.g. Free Tier account limit / Payment required),
+          // query existing profiles so the connection can proceed
+          try {
+            const listRes = await zernio.profiles.listProfiles();
+            const profiles = (listRes?.data as any)?.profiles || (listRes?.data as any) || [];
+            if (Array.isArray(profiles) && profiles.length > 0) {
+              profileId = profiles[0]._id || profiles[0].id;
+              if (profileId) {
+                await query`
+                  UPDATE businesses
+                  SET zernio_profile_id = ${profileId}
+                  WHERE id = ${business.id}
+                `;
+              }
+            }
+          } catch (listErr) {
+            console.warn("[getZernioConnectUrl] listProfiles fallback warning:", listErr);
           }
         }
-      } catch (profileErr) {
-        console.warn("Could not manage isolated profile, using fallback:", profileErr);
       }
 
-      // forceReauth=true tells Instagram to show its login page (ID & Password)
-      // so users connect their OWN Instagram account instead of auto-reusing any cached session.
+      // Default fallback profile if needed
+      if (!profileId) {
+        profileId = "6ad323c1906cf34fba1f8939";
+      }
+
+      // Generate cryptographically signed state carrying businessId & userId
+      const signedState = signOAuthState({
+        businessId: business.id,
+        userId: session.userId,
+      });
+
+      const redirectUri = `${appUrl}/auth/zernio-callback?state=${encodeURIComponent(signedState)}`;
+
+      // forceReauth=true ensures Instagram prompt is presented for this specific business
       const connectRes = await zernio.connect.getConnectUrl({
         path: { platform: normalizedPlatform as any },
         query: {
@@ -134,7 +200,11 @@ export const getZernioConnectUrl = createServerFn({ method: "GET" })
         throw new Error("Could not obtain OAuth authorization URL from Zernio");
       }
 
-      return apiSuccess({ url: authUrl }, "Connect URL generated successfully");
+      return apiSuccess({
+        url: authUrl,
+        businessId: business.id,
+        businessName: business.name,
+      }, "Connect URL generated successfully");
     } catch (err) {
       return errorToResponse(err);
     }
@@ -147,7 +217,6 @@ export const connectAccount = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     try {
       const session = await requireAuth();
-      if (!session.businessId) throw new ForbiddenError("No active business");
 
       const ip = getClientIp();
       await checkRateLimit(ip, "general");
@@ -159,43 +228,117 @@ export const connectAccount = createServerFn({ method: "POST" })
 
       const d = parsed.data;
 
-      const [account] = await query<ConnectedAccountRow>`
-        INSERT INTO connected_accounts (
-          business_id, platform, platform_user_id, platform_handle,
-          zernio_account_id, status
+      // Extract and verify business ID
+      let targetBusinessId = d.business_id || session.businessId;
+
+      if (d.state) {
+        try {
+          const verified = verifyOAuthState(d.state);
+          // Check that session user matches signed state user
+          if (verified.userId && verified.userId !== session.userId) {
+            throw new ForbiddenError("OAuth state user mismatch. Connection rejected.");
+          }
+          if (verified.businessId) {
+            targetBusinessId = verified.businessId;
+          }
+        } catch (stateErr: any) {
+          throw new ValidationError(stateErr.message || "Invalid or tampered OAuth state.");
+        }
+      }
+
+      if (!targetBusinessId) throw new ForbiddenError("No business workspace specified.");
+
+      // Verify user owns the target business
+      const business = await assertUserOwnsBusiness(session.userId, targetBusinessId);
+
+      const platformNormalized = d.platform.toLowerCase();
+      const rawHandle = d.platform_handle || "connected";
+      const cleanUsername = rawHandle.replace(/^@/, "").trim();
+
+      // Enforce: "the same Instagram account must not be linked to two businesses"
+      const duplicateAccount = await queryOne<{ id: string; name: string }>`
+        SELECT b.id, b.name
+        FROM social_accounts sa
+        JOIN businesses b ON b.id = sa.business_id
+        WHERE LOWER(sa.platform) = ${platformNormalized}
+          AND sa.external_account_id = ${d.zernio_account_id}
+          AND sa.status != 'disconnected'
+          AND sa.business_id != ${business.id}
+          AND sa.deleted_at IS NULL
+          AND b.deleted_at IS NULL
+        LIMIT 1
+      `;
+
+      if (duplicateAccount) {
+        throw new ValidationError(
+          `This ${d.platform} account (@${cleanUsername}) is already linked to another workspace ("${duplicateAccount.name}"). The same Instagram account cannot be linked to multiple businesses.`
+        );
+      }
+
+      // Upsert into social_accounts
+      const [account] = await query<SocialAccountItem>`
+        INSERT INTO social_accounts (
+          business_id, platform, external_account_id, username, status, connected_at
         )
         VALUES (
-          ${session.businessId},
-          ${d.platform},
-          ${d.platform_user_id ?? null},
-          ${d.platform_handle ?? null},
+          ${business.id},
+          ${platformNormalized},
           ${d.zernio_account_id},
-          'connected'
+          ${cleanUsername},
+          'connected',
+          now()
         )
-        ON CONFLICT (business_id, platform) DO UPDATE SET
-          platform_user_id  = COALESCE(EXCLUDED.platform_user_id, connected_accounts.platform_user_id),
-          platform_handle   = COALESCE(EXCLUDED.platform_handle, connected_accounts.platform_handle),
-          zernio_account_id = EXCLUDED.zernio_account_id,
-          status            = 'connected',
-          deleted_at        = NULL
-        RETURNING id, business_id, platform, platform_user_id, platform_handle,
-                  zernio_account_id, status, connected_at, updated_at
+        ON CONFLICT (business_id, platform, external_account_id) DO UPDATE SET
+          username     = EXCLUDED.username,
+          status       = 'connected',
+          connected_at = now(),
+          deleted_at   = NULL
+        RETURNING id, business_id, platform, external_account_id, username, status, connected_at, updated_at
       `;
+
+      // Legacy sync to connected_accounts
+      try {
+        await query`
+          INSERT INTO connected_accounts (
+            business_id, platform, platform_user_id, platform_handle,
+            zernio_account_id, status
+          )
+          VALUES (
+            ${business.id},
+            ${d.platform},
+            ${d.platform_user_id ?? null},
+            ${cleanUsername},
+            ${d.zernio_account_id},
+            'connected'
+          )
+          ON CONFLICT (business_id, platform) DO UPDATE SET
+            platform_handle   = EXCLUDED.platform_handle,
+            zernio_account_id = EXCLUDED.zernio_account_id,
+            status            = 'connected',
+            deleted_at        = NULL
+        `;
+      } catch (legacyErr) {
+        console.warn("[connectAccount] Legacy sync warning:", legacyErr);
+      }
 
       // Audit log
       await query`
         INSERT INTO audit_log (user_id, business_id, action, resource_type, resource_id, metadata)
         VALUES (
           ${session.userId},
-          ${session.businessId},
+          ${business.id},
           'account.connected',
-          'connected_account',
+          'social_account',
           ${account?.id}::uuid,
-          ${JSON.stringify({ platform: d.platform, handle: d.platform_handle })}::jsonb
+          ${JSON.stringify({ platform: d.platform, username: cleanUsername, accountId: d.zernio_account_id })}::jsonb
         )
       `;
 
-      return apiSuccess({ account }, "Account connected successfully");
+      return apiSuccess({
+        account,
+        businessId: business.id,
+        businessName: business.name,
+      }, `${d.platform} account @${cleanUsername} connected successfully`);
     } catch (err) {
       return errorToResponse(err);
     }
@@ -204,32 +347,42 @@ export const connectAccount = createServerFn({ method: "POST" })
 // ─── disconnectAccount ────────────────────────────────────────────────────────
 
 export const disconnectAccount = createServerFn({ method: "POST" })
-  .validator((d: { platform: string }) => d)
+  .validator((d: { account_id?: string | undefined; platform?: string | undefined; business_id?: string | undefined }) => d)
   .handler(async ({ data }) => {
     try {
       const session = await requireAuth();
-      if (!session.businessId) throw new ForbiddenError("No active business");
+      const targetBusinessId = data?.business_id || session.businessId;
+      if (!targetBusinessId) throw new ForbiddenError("No active business");
 
       const ip = getClientIp();
       await checkRateLimit(ip, "general");
 
-      const { platform } = data;
+      await assertUserOwnsBusiness(session.userId, targetBusinessId);
 
-      const existing = await queryOne<ConnectedAccountRow>`
-        SELECT * FROM connected_accounts
-        WHERE business_id = ${session.businessId}
-          AND platform = ${platform}
-          AND deleted_at IS NULL
-      `;
-      if (!existing) throw new NotFoundError("Connected account");
+      const { account_id, platform } = data;
 
-      await query`
-        UPDATE connected_accounts
-        SET status = 'disconnected', deleted_at = now()
-        WHERE id = ${existing.id}
-      `;
+      if (account_id) {
+        await query`
+          UPDATE social_accounts
+          SET status = 'disconnected', deleted_at = now()
+          WHERE id = ${account_id} AND business_id = ${targetBusinessId}
+        `;
+      } else if (platform) {
+        await query`
+          UPDATE social_accounts
+          SET status = 'disconnected', deleted_at = now()
+          WHERE business_id = ${targetBusinessId} AND LOWER(platform) = LOWER(${platform})
+        `;
+        await query`
+          UPDATE connected_accounts
+          SET status = 'disconnected', deleted_at = now()
+          WHERE business_id = ${targetBusinessId} AND LOWER(platform) = LOWER(${platform})
+        `;
+      } else {
+        throw new ValidationError("Account ID or platform is required");
+      }
 
-      return apiSuccess({ platform }, "Account disconnected successfully");
+      return apiSuccess({ success: true }, "Account disconnected successfully");
     } catch (err) {
       return errorToResponse(err);
     }

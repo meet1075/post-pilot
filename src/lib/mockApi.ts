@@ -3,6 +3,8 @@ export type Platform = "Instagram" | "Facebook" | "X";
 
 export interface SocialPost {
   id: string;
+  businessId?: string | undefined;
+  socialAccountId?: string | null | undefined;
   headline: string;
   caption: string;
   date: string;
@@ -21,11 +23,17 @@ export interface PosterOption {
   headline: string;
   price: string;
   date_text?: string | undefined;
+  venue_text?: string | undefined;
   footer: string;
   imageUrl?: string | undefined;
+  format?: "Square" | "Portrait 4:5" | "Story" | undefined;
   brief?: any;
   needs_review?: boolean | undefined;
   text_check_passed?: boolean | undefined;
+  model_used?: string | undefined;
+  size?: string | undefined;
+  quality?: string | undefined;
+  repair_calls?: number | undefined;
 }
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -115,14 +123,27 @@ const styles = [
 
 export async function generatePosters(
   prompt: string,
-  style?: string,
+  style?: string | undefined,
   use_brand = true,
-  brandKit?: { businessName?: string; tagline?: string; colors?: string[] },
-  count = 2
+  brandKit?: { businessName?: string | undefined; tagline?: string | undefined; colors?: string[] | undefined; businessId?: string | undefined } | undefined,
+  count = 2,
+  format?: "Square" | "Portrait 4:5" | "Story" | undefined,
+  businessId?: string | undefined,
+  socialAccountId?: string | null | undefined
 ): Promise<PosterOption[]> {
   try {
     const { generatePosters: serverGen } = await import("@/api/posters");
-    const res = await serverGen({ data: { prompt, style: (style as any) || "Bold", use_brand, count } });
+    const res = await serverGen({
+      data: {
+        prompt,
+        style: (style as any) || "Bold",
+        format: (format as any) || "Portrait 4:5",
+        use_brand,
+        count,
+        business_id: businessId || brandKit?.businessId,
+        social_account_id: socialAccountId,
+      },
+    });
     const rawOptions = (res as any)?.data?.options ?? (res as any)?.options;
     if (Array.isArray(rawOptions) && rawOptions.length > 0) {
       return rawOptions;
@@ -162,10 +183,31 @@ export async function generatePosters(
   }));
 }
 
-export async function suggestCaptions(headline: string, price: string): Promise<string[]> {
+export async function editPosterWithAi(data: {
+  imageUrl: string;
+  instruction: string;
+  optionId?: string;
+  currentBrief?: any;
+}): Promise<PosterOption> {
+  try {
+    const { editPosterWithAi: serverEdit } = await import("@/api/posters");
+    const res = await serverEdit({ data });
+    const rawOption = (res as any)?.data?.option ?? (res as any)?.option;
+    if (rawOption) return rawOption;
+    if ((res as any)?.error?.message) {
+      throw new Error((res as any).error.message);
+    }
+  } catch (err: any) {
+    console.warn("[editPosterWithAi] Server call failed:", err);
+    throw new Error(err?.message || "Failed to update poster with AI");
+  }
+  throw new Error("Failed to update poster with AI");
+}
+
+export async function suggestCaptions(headline: string, price: string, businessId?: string): Promise<string[]> {
   try {
     const { suggestCaptions: serverCaptions } = await import("@/api/captions");
-    const res = await serverCaptions({ data: { headline, price } });
+    const res = await serverCaptions({ data: { headline, price, business_id: businessId } });
     if (res?.success && Array.isArray(res.suggestions) && res.suggestions.length > 0) {
       return res.suggestions.map((s: any) => {
         if (typeof s === "string") {
@@ -216,6 +258,8 @@ export async function publishPost(post: SocialPost): Promise<SocialPost> {
         theme: post.theme,
         price: post.price,
         image_url: post.imageUrl ?? null,
+        business_id: post.businessId,
+        social_account_id: post.socialAccountId ?? null,
       },
     });
 
@@ -228,6 +272,8 @@ export async function publishPost(post: SocialPost): Promise<SocialPost> {
           timing: post.status === "Posted" ? "now" : "schedule",
           scheduled_date: post.date,
           scheduled_time: post.time,
+          business_id: post.businessId,
+          social_account_id: post.socialAccountId ?? null,
         },
       });
 
