@@ -16,7 +16,7 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
-import { requireAuth } from "../lib/auth.js";
+import { requireAuth, assertUserOwnsBusiness } from "../lib/auth.js";
 import { query, queryOne } from "../lib/db.js";
 import { checkRateLimit, getClientIp } from "../lib/rateLimit.js";
 import { publishPostSchema } from "../lib/validators.js";
@@ -81,11 +81,15 @@ export const publishPost = createServerFn({ method: "POST" })
         WHERE id = ${post_id} AND deleted_at IS NULL
       `;
       if (!post) throw new NotFoundError("Post");
-      if (post.business_id !== session.businessId) throw new ForbiddenError();
+
+      // Enforce business ownership
+      const business = await assertUserOwnsBusiness(session.userId, post.business_id);
 
       const primaryPlatform = platforms[0]!;
       log.publish(primaryPlatform, `Publish requested (${timing})`, {
         postId: post_id,
+        businessId: business.id,
+        businessName: business.name,
         headline: post.headline,
         hasCustomImage: Boolean(post.image_url),
       });
@@ -101,18 +105,68 @@ export const publishPost = createServerFn({ method: "POST" })
         log.publish(primaryPlatform, "Notice: No custom image found on post, falling back to stock image", { url: effectiveImageUrl });
       }
 
-      // Get connected accounts for requested platforms
-      const account = await queryOne<ConnectedAccountRow>`
-        SELECT id, platform, zernio_account_id, status, platform_handle
-        FROM connected_accounts
-        WHERE business_id = ${session.businessId}
-          AND platform = ${primaryPlatform}
-          AND deleted_at IS NULL
-      `;
+      // Resolve connected account: either explicit social_account_id or active account for this platform
+      const targetSocialAccountId = parsed.data.social_account_id || post.social_account_id;
+      let account: { id: string; platform: string; zernio_account_id: string; status: string; platform_handle: string | null } | null = null;
+
+      if (targetSocialAccountId) {
+        const sa = await queryOne<{ id: string; platform: string; external_account_id: string; status: string; username: string }>`
+          SELECT id, platform, external_account_id, status, username
+          FROM social_accounts
+          WHERE id = ${targetSocialAccountId}
+            AND business_id = ${business.id}
+            AND deleted_at IS NULL
+        `;
+        if (sa) {
+          account = {
+            id: sa.id,
+            platform: sa.platform,
+            zernio_account_id: sa.external_account_id,
+            status: sa.status,
+            platform_handle: sa.username,
+          };
+        }
+      }
+
+      if (!account) {
+        const sa = await queryOne<{ id: string; platform: string; external_account_id: string; status: string; username: string }>`
+          SELECT id, platform, external_account_id, status, username
+          FROM social_accounts
+          WHERE business_id = ${business.id}
+            AND LOWER(platform) = LOWER(${primaryPlatform})
+            AND status = 'connected'
+            AND deleted_at IS NULL
+          ORDER BY connected_at DESC
+          LIMIT 1
+        `;
+        if (sa) {
+          account = {
+            id: sa.id,
+            platform: sa.platform,
+            zernio_account_id: sa.external_account_id,
+            status: sa.status,
+            platform_handle: sa.username,
+          };
+        }
+      }
+
+      // Legacy fallback
+      if (!account) {
+        const legacy = await queryOne<ConnectedAccountRow>`
+          SELECT id, platform, zernio_account_id, status, platform_handle
+          FROM connected_accounts
+          WHERE business_id = ${business.id}
+            AND LOWER(platform) = LOWER(${primaryPlatform})
+            AND deleted_at IS NULL
+        `;
+        if (legacy) {
+          account = legacy;
+        }
+      }
 
       if (!account || account.status !== "connected") {
         throw new AppError(
-          `Your ${primaryPlatform} account is not connected. Go to Accounts to connect it.`,
+          `Your ${primaryPlatform} account is not connected for "${business.name}". Please connect Instagram in Accounts first.`,
           422
         );
       }
@@ -139,14 +193,15 @@ export const publishPost = createServerFn({ method: "POST" })
 
       const [updatedPost] = await query<PostRow>`
         UPDATE posts SET
-          status          = ${newStatus},
-          platform        = ${primaryPlatform},
-          date            = ${timing === "now" ? localDate : (scheduled_date ?? null)},
-          time            = ${timing === "now" ? localTime : (scheduled_time ?? null)},
-          image_url       = COALESCE(${effectiveImageUrl ?? null}, image_url),
-          zernio_post_id  = ${zernioResult.postId ?? null},
-          published_at    = ${timing === "now" ? new Date().toISOString() : null},
-          error_message   = NULL
+          status            = ${newStatus},
+          platform          = ${primaryPlatform},
+          date              = ${timing === "now" ? localDate : (scheduled_date ?? null)},
+          time              = ${timing === "now" ? localTime : (scheduled_time ?? null)},
+          image_url         = COALESCE(${effectiveImageUrl ?? null}, image_url),
+          social_account_id = ${account.id},
+          zernio_post_id    = ${zernioResult.postId ?? null},
+          published_at      = ${timing === "now" ? new Date().toISOString() : null},
+          error_message     = NULL
         WHERE id = ${post_id}
         RETURNING *
       `;
@@ -158,11 +213,11 @@ export const publishPost = createServerFn({ method: "POST" })
         INSERT INTO audit_log (user_id, business_id, action, resource_type, resource_id, metadata)
         VALUES (
           ${session.userId},
-          ${session.businessId},
+          ${business.id},
           ${timing === "now" ? "post.published" : "post.scheduled"},
           'post',
           ${post_id}::uuid,
-          ${JSON.stringify({ platforms, timing, scheduledAt: scheduledAtIso, zernioPostId: zernioResult.postId })}::jsonb
+          ${JSON.stringify({ platforms, timing, scheduledAt: scheduledAtIso, zernioPostId: zernioResult.postId, socialAccountId: account.id })}::jsonb
         )
       `;
 

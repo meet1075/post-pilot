@@ -19,6 +19,18 @@ async function getServerEntry(): Promise<ServerEntry> {
   return serverEntryPromise;
 }
 
+function isClientAbort(err: unknown): boolean {
+  if (!err) return false;
+  if (err instanceof Error) {
+    if (err.name === "AbortError" || err.message.includes("aborted") || (err as any).code === "ECONNRESET") {
+      return true;
+    }
+    if (err.cause && isClientAbort(err.cause)) return true;
+  }
+  const str = String(err);
+  return str.includes("aborted") || str.includes("ECONNRESET");
+}
+
 // h3 swallows in-handler throws into a normal 500 Response with body
 // {"unhandled":true,"message":"HTTPError"} — try/catch alone never fires for those.
 async function normalizeCatastrophicSsrResponse(response: Response): Promise<Response> {
@@ -29,7 +41,12 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
   const body = await response.clone().text();
   if (!isH3SwallowedErrorBody(body)) return response;
 
-  console.error(consumeLastCapturedError() ?? new Error(`h3 swallowed SSR error: ${body}`));
+  const capturedErr = consumeLastCapturedError();
+  if (isClientAbort(capturedErr)) {
+    return new Response(null, { status: 499, statusText: "Client Closed Request" });
+  }
+
+  console.error(capturedErr ?? new Error(`h3 swallowed SSR error: ${body}`));
   return new Response(renderErrorPage(), {
     status: 500,
     headers: { "content-type": "text/html; charset=utf-8" },
@@ -154,12 +171,22 @@ export default {
 
       const startMs = Date.now();
       const handler = await getServerEntry();
+      const isApiRequest =
+        url.pathname.startsWith("/api/") ||
+        url.pathname.startsWith("/_server") ||
+        request.headers.get("accept")?.includes("application/json");
+
       const response = await handler.fetch(request, env, ctx);
-      const normalizedResponse = await normalizeCatastrophicSsrResponse(response);
+      const normalizedResponse = isApiRequest
+        ? response
+        : await normalizeCatastrophicSsrResponse(response);
       const durationMs = Date.now() - startMs;
       console.log(`[HTTP ${request.method}] ${url.pathname} - ${normalizedResponse.status} (${durationMs}ms)`);
       return normalizedResponse;
     } catch (error) {
+      if (isClientAbort(error)) {
+        return new Response(null, { status: 499, statusText: "Client Closed Request" });
+      }
       console.error(`[Server Error] ${request.method} ${request.url}:`, error);
       const url = new URL(request.url);
       const isApiRequest =

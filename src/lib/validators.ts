@@ -26,7 +26,16 @@ export const platformSchema = z.enum(["Instagram", "Facebook", "X"]);
 
 export const postStatusSchema = z.enum(["Draft", "Scheduled", "Posted", "Failed", "Cancelled"]);
 
-export const toneSchema = z.enum(["Friendly", "Premium", "Playful", "Direct"]);
+export const toneSchema = z.enum([
+  "Friendly",
+  "Professional",
+  "Premium",
+  "Playful",
+  "Direct",
+  "Bold",
+  "Casual",
+  "Luxury",
+]);
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -39,18 +48,26 @@ export const verifyMagicLinkSchema = z.object({
   token: z.string().length(64, "Token must be exactly 64 characters"),
 });
 
-// ─── Business ─────────────────────────────────────────────────────────────────
-
 export const createBusinessSchema = z.object({
   name: z.string().trim().min(1, "Business name is required").max(200, "Business name cannot exceed 200 characters"),
-  tagline: z.string().max(500, "Tagline cannot exceed 500 characters").default(""),
-  location: z.string().max(300, "Location cannot exceed 300 characters").default(""),
-  phone: z.string().regex(REGEX.phone, "Invalid phone number format").default(""),
+  tagline: z.string().max(500, "Tagline cannot exceed 500 characters").optional().nullable().default(""),
+  logo_url: z.string().optional().nullable().or(z.literal("")),
+  brand_colors: z.array(z.string().max(50)).max(5, "Maximum 5 brand colors allowed").optional().default(["Tomato", "Olive"]),
+  tone: toneSchema.default("Friendly"),
+  default_hashtags: z.string().max(2000).optional().nullable().default(""),
+  location: z.string().max(300, "Location cannot exceed 300 characters").optional().nullable().default(""),
+  phone: z.string().optional().nullable().default(""),
   timezone: z.string().max(100).default("UTC"),
-  business_type: z.string().max(50).default("restaurant"),
+  business_type: z.string().max(50).default("General"),
 });
 
-export const updateBusinessSchema = createBusinessSchema.partial();
+export const updateBusinessSchema = createBusinessSchema.partial().extend({
+  business_id: z.string().optional(),
+});
+
+export const deleteBusinessSchema = z.object({
+  business_id: z.string().min(1, "Business ID is required"),
+});
 
 // ─── Brand Kit ────────────────────────────────────────────────────────────────
 
@@ -82,11 +99,14 @@ export const createPostSchema = z.object({
   price: z.string().max(100, "Price text cannot exceed 100 characters").default(""),
   status: postStatusSchema.default("Draft"),
   image_url: z.string().optional().nullable(),
+  business_id: z.string().optional(),
+  social_account_id: z.string().optional().nullable(),
 });
 
 export const updatePostSchema = createPostSchema.partial().extend({
   image_url: z.string().optional().nullable(),
   image_r2_key: z.string().max(500).optional().nullable(),
+  social_account_id: z.string().optional().nullable(),
 });
 
 // ─── Poster Generation ────────────────────────────────────────────────────────
@@ -97,6 +117,8 @@ export const generatePostersSchema = z.object({
   format: z.enum(["Square", "Portrait 4:5", "Story"]).default("Portrait 4:5"),
   use_brand: z.boolean().default(true),
   count: z.number().int().min(1).max(4).default(2).optional(),
+  business_id: z.string().optional(),
+  social_account_id: z.string().optional().nullable(),
 });
 
 // ─── Captions ─────────────────────────────────────────────────────────────────
@@ -108,6 +130,7 @@ export const suggestCaptionsSchema = z.object({
   business_name: z.string().max(100).optional(),
   platform: platformSchema.default("Instagram"),
   tone: toneSchema.default("Friendly"),
+  business_id: z.string().optional(),
 });
 
 // ─── Publish ──────────────────────────────────────────────────────────────────
@@ -124,6 +147,8 @@ export const publishPostSchema = z.object({
     .string()
     .regex(REGEX.time, "Scheduled time must be HH:MM")
     .optional(),
+  social_account_id: z.string().optional().nullable(),
+  business_id: z.string().optional(),
 });
 
 // ─── Connected Accounts ───────────────────────────────────────────────────────
@@ -136,4 +161,6 @@ export const connectAccountSchema = z.object({
     .regex(REGEX.socialHandle, "Handle must contain only letters, numbers, periods, or underscores (1-30 chars)")
     .optional(),
   platform_user_id: z.string().max(200).optional(),
+  state: z.string().optional(),
+  business_id: z.string().optional(),
 });
