@@ -22,6 +22,7 @@ import {
 } from "../lib/errors.js";
 import { log } from "../lib/logger.js";
 import { apiSuccess, formatZodIssues } from "../lib/apiResponse.js";
+import { uploadPosterImage } from "../lib/storage.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -180,10 +181,60 @@ export const createPost = createServerFn({ method: "POST" })
       // Enforce ownership
       await assertUserOwnsBusiness(session.userId, targetBusinessId);
 
+      let finalImageUrl = d.image_url ?? null;
+      let r2Key: string | null = null;
+
+      // Only store the CHOSEN flyer image in Cloudflare R2!
+      if (d.image_url) {
+        await checkRateLimit(ip, "upload");
+
+        const isTemporary =
+          d.image_url.startsWith("data:image/") ||
+          d.image_url.includes("blob.core.windows.net") ||
+          d.image_url.includes("oaidalle") ||
+          d.image_url.includes("openai.com") ||
+          d.image_url.includes("ideogram.ai");
+
+        if (isTemporary) {
+          try {
+            let buffer: Buffer | null = null;
+            let contentType = "image/png";
+
+            if (d.image_url.startsWith("data:image/")) {
+              const match = d.image_url.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+              if (match && match[1] && match[2]) {
+                contentType = match[1];
+                buffer = Buffer.from(match[2], "base64");
+              }
+            } else {
+              const imgRes = await fetch(d.image_url, { signal: AbortSignal.timeout(30_000) });
+              if (imgRes.ok) {
+                buffer = Buffer.from(await imgRes.arrayBuffer());
+                contentType = imgRes.headers.get("content-type") || "image/png";
+              }
+            }
+
+            if (buffer) {
+              const storageKey = `posters/${targetBusinessId}/${Date.now()}-chosen.png`;
+              const uploaded = await uploadPosterImage({
+                key: storageKey,
+                body: buffer,
+                contentType,
+              });
+              finalImageUrl = uploaded.publicUrl;
+              r2Key = storageKey;
+              log.storage("R2", "Successfully saved ONLY chosen flyer to Cloudflare R2", { storageKey, publicUrl: finalImageUrl });
+            }
+          } catch (uploadErr) {
+            log.storage("R2", `Could not transfer chosen image to R2: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}, keeping transient URL`);
+          }
+        }
+      }
+
       const [post] = await query<PostRow>`
         INSERT INTO posts (
           business_id, social_account_id, headline, caption, prompt,
-          date, time, status, platform, theme, price, image_url
+          date, time, status, platform, theme, price, image_url, image_r2_key
         ) VALUES (
           ${targetBusinessId},
           ${d.social_account_id ?? null},
@@ -196,7 +247,8 @@ export const createPost = createServerFn({ method: "POST" })
           ${d.platform},
           ${d.theme},
           ${d.price},
-          ${d.image_url ?? null}
+          ${finalImageUrl},
+          ${r2Key}
         )
         RETURNING *
       `;

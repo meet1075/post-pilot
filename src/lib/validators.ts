@@ -137,7 +137,8 @@ export const suggestCaptionsSchema = z.object({
 
 export const publishPostSchema = z.object({
   post_id: uuidSchema,
-  platforms: z.array(platformSchema).min(1, "Please select at least one social media platform").max(3),
+  platforms: z.array(platformSchema).min(1, "Please select at least one social media platform").max(5).optional(),
+  social_account_ids: z.array(z.string()).optional(),
   timing: z.enum(["now", "schedule"]),
   scheduled_date: z
     .string()

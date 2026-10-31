@@ -487,30 +487,25 @@ Render ONLY the quoted text exactly as written, with 100% accurate spelling. Do 
 
     const data = (await genRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
     const item = data.data?.[0];
-    if (item?.b64_json) {
-      rawBuffer = Buffer.from(item.b64_json, "base64");
-    } else if (item?.url) {
-      const imgRes = await fetch(item.url);
-      if (imgRes.ok) {
-        rawBuffer = Buffer.from(await imgRes.arrayBuffer());
-      }
+    let previewUrl: string | null = null;
+    if (item?.url) {
+      previewUrl = item.url;
+    } else if (item?.b64_json) {
+      previewUrl = `data:image/png;base64,${item.b64_json}`;
     }
+
+    if (!previewUrl) {
+      throw new ExternalServiceError("No image data returned from OpenAI Image API");
+    }
+
+    // Do NOT upload to permanent R2 storage yet!
+    // We return the transient preview URL so only the user's CHOSEN flyer gets saved to R2 on post creation.
+    log.ai("OpenAI", "Generated transient flyer option preview (not stored in R2 yet)", { url: previewUrl.slice(0, 60) });
+    return { url: previewUrl, model, size, quality };
   }
 
-  if (!rawBuffer) {
-    throw new ExternalServiceError("No image data returned from OpenAI Image API");
-  }
-
-  // Upload finished PNG to Supabase bucket
-  const storageKey = `posters/generated/${Date.now()}-flyer.png`;
-  const { publicUrl } = await uploadPosterImage({
-    key: storageKey,
-    body: rawBuffer,
-    contentType: "image/png",
-  });
-
-  log.storage("Supabase", "Saved finished flyer to Supabase storage", { storageKey, publicUrl });
-  return { url: publicUrl, model, size, quality };
+  const previewDataUrl = `data:image/png;base64,${rawBuffer.toString("base64")}`;
+  return { url: previewDataUrl, model, size, quality };
 }
 
 // ─── Step 3: Automatic Vision Text Check & Repair (gpt-4o-mini) ───────────────
@@ -848,15 +843,13 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
                 if (fetchRes.ok) buffer = Buffer.from(await fetchRes.arrayBuffer());
               }
 
-              if (buffer) {
-                const storageKey = `posters/generated/${Date.now()}-ai-edited.png`;
-                const { publicUrl } = await uploadPosterImage({
-                  key: storageKey,
-                  body: buffer,
-                  contentType: "image/png",
-                });
-                editedUrl = publicUrl;
-                log.ai("OpenAI", "Successfully modified poster image via images/edits", { publicUrl });
+              if (item?.url) {
+                editedUrl = item.url;
+              } else if (item?.b64_json) {
+                editedUrl = `data:image/png;base64,${item.b64_json}`;
+              }
+              if (editedUrl) {
+                log.ai("OpenAI", "Successfully modified poster preview via images/edits", { preview: editedUrl.slice(0, 60) });
               }
             } else {
               const errText = await editRes.text();
@@ -942,25 +935,14 @@ export const editPosterText = createServerFn({ method: "POST" })
 
       const json = (await editRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
       const item = json.data?.[0];
-      let buffer: Buffer | null = null;
-      if (item?.b64_json) {
-        buffer = Buffer.from(item.b64_json, "base64");
-      } else if (item?.url) {
-        const fetchRes = await fetch(item.url);
-        if (fetchRes.ok) buffer = Buffer.from(await fetchRes.arrayBuffer());
+      let previewUrl = item?.url;
+      if (!previewUrl && item?.b64_json) {
+        previewUrl = `data:image/png;base64,${item.b64_json}`;
       }
+      if (!previewUrl) throw new ExternalServiceError("No image returned from edit endpoint");
 
-      if (!buffer) throw new ExternalServiceError("No image returned from edit endpoint");
-
-      const key = `posters/generated/${Date.now()}-edited.png`;
-      const { publicUrl } = await uploadPosterImage({
-        key,
-        body: buffer,
-        contentType: "image/png",
-      });
-
-      log.ai("OpenAI", "Updated flyer text via images/edits", { oldText: data.oldText, newText: data.newText, publicUrl });
-      return apiSuccess({ imageUrl: publicUrl }, "Flyer text updated successfully");
+      log.ai("OpenAI", "Updated flyer preview via images/edits", { oldText: data.oldText, newText: data.newText });
+      return apiSuccess({ imageUrl: previewUrl }, "Flyer text updated successfully");
     } catch (err) {
       return errorToResponse(err);
     }
@@ -1161,15 +1143,20 @@ export const generatePosters = createServerFn({ method: "POST" })
         }
       }
 
-      // Store generation record with full metadata (no secrets)
-      // Store generation record with full metadata (no secrets)
+      // Store lightweight generation audit log (omits raw unselected image blobs so DB stays lean)
+      const auditOptions = options.map((o) => ({
+        id: o.id,
+        theme: o.theme,
+        headline: o.headline,
+        format: o.format,
+      }));
       await query`
         INSERT INTO poster_generations (business_id, social_account_id, prompt, options, model_used, cost_usd)
         VALUES (
           ${business.id},
           ${parsed.data.social_account_id ?? null},
           ${prompt},
-          ${JSON.stringify(options)}::jsonb,
+          ${JSON.stringify(auditOptions)}::jsonb,
           ${modelUsed},
           ${costUsd}
         )
@@ -1196,6 +1183,8 @@ export const uploadPosterDataUrl = createServerFn({ method: "POST" })
   .validator((d: { dataUrl: string; filename?: string }) => d)
   .handler(async ({ data }) => {
     try {
+      const ip = getClientIp();
+      await checkRateLimit(ip, "upload");
       const session = await requireAuth();
       const base64Data = data.dataUrl.replace(/^data:image\/\w+;base64,/, "");
       const buffer = Buffer.from(base64Data, "base64");

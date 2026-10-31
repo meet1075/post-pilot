@@ -159,7 +159,7 @@ export const getLogoUploadUrl = createServerFn({ method: "POST" })
       if (!session.businessId) throw new ForbiddenError("No active business");
 
       const ip = getClientIp();
-      await checkRateLimit(ip, "general");
+      await checkRateLimit(ip, "upload");
 
       const { ext = "png" } = data ?? {};
       const safeExt = ["png", "jpg", "jpeg", "webp", "svg"].includes(ext) ? ext : "png";
@@ -180,6 +180,9 @@ export const uploadBrandLogo = createServerFn({ method: "POST" })
   .validator((d: { dataUrl: string; filename?: string; businessId?: string }) => d)
   .handler(async ({ data }) => {
     try {
+      const ip = getClientIp();
+      await checkRateLimit(ip, "upload");
+
       let businessId = data.businessId || "general";
       try {
         const session = await requireAuth();

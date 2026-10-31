@@ -213,13 +213,22 @@ export const getZernioConnectUrl = createServerFn({ method: "GET" })
 
       const redirectUri = `${appUrl}/auth/zernio-callback?state=${encodeURIComponent(signedState)}`;
 
-      // forceReauth=true ensures Instagram prompt is presented for this specific business
+      let zernioPlatform: "facebook" | "instagram" | "twitter" = "instagram";
+      if (normalizedPlatform === "facebook") {
+        zernioPlatform = "facebook";
+      } else if (normalizedPlatform === "x" || normalizedPlatform === "twitter") {
+        zernioPlatform = "twitter";
+      } else {
+        zernioPlatform = "instagram";
+      }
+
+      // forceReauth=true ensures prompt is presented for this specific business
       const connectRes = await zernio.connect.getConnectUrl({
-        path: { platform: normalizedPlatform as any },
+        path: { platform: zernioPlatform },
         query: {
           profileId,
           redirect_url: redirectUri,
-          forceReauth: true,
+          forceReauth: zernioPlatform === "instagram" ? true : undefined,
         },
       });
 

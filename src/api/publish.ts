@@ -57,7 +57,7 @@ export const publishPost = createServerFn({ method: "POST" })
         throw new ValidationError("Validation failed", formatZodIssues(parsed.error.issues));
       }
 
-      const { post_id, platforms, timing, scheduled_date, scheduled_time } = parsed.data;
+      const { post_id, platforms = ["Instagram"], timing, scheduled_date, scheduled_time, social_account_ids } = parsed.data;
 
       // Validate scheduled time
       if (timing === "schedule") {
@@ -85,7 +85,7 @@ export const publishPost = createServerFn({ method: "POST" })
       // Enforce business ownership
       const business = await assertUserOwnsBusiness(session.userId, post.business_id);
 
-      const primaryPlatform = platforms[0]!;
+      const primaryPlatform = (platforms && platforms[0]) || "Instagram";
       log.publish(primaryPlatform, `Publish requested (${timing})`, {
         postId: post_id,
         businessId: business.id,
@@ -105,76 +105,102 @@ export const publishPost = createServerFn({ method: "POST" })
         log.publish(primaryPlatform, "Notice: No custom image found on post, falling back to stock image", { url: effectiveImageUrl });
       }
 
-      // Resolve connected account: either explicit social_account_id or active account for this platform
-      const targetSocialAccountId = parsed.data.social_account_id || post.social_account_id;
-      let account: { id: string; platform: string; zernio_account_id: string; status: string; platform_handle: string | null } | null = null;
+      // Resolve connected accounts for ALL requested accounts / platforms
+      const targetAccounts: Array<{
+        id: string;
+        platform: string;
+        zernio_account_id: string;
+        status: string;
+        platform_handle: string | null;
+      }> = [];
 
-      if (targetSocialAccountId) {
-        const sa = await queryOne<{ id: string; platform: string; external_account_id: string; status: string; username: string }>`
-          SELECT id, platform, external_account_id, status, username
-          FROM social_accounts
-          WHERE id = ${targetSocialAccountId}
-            AND business_id = ${business.id}
-            AND deleted_at IS NULL
-        `;
-        if (sa) {
-          account = {
-            id: sa.id,
-            platform: sa.platform,
-            zernio_account_id: sa.external_account_id,
-            status: sa.status,
-            platform_handle: sa.username,
-          };
-        }
-      }
-
-      if (!account) {
-        const sa = await queryOne<{ id: string; platform: string; external_account_id: string; status: string; username: string }>`
+      // 1. If explicit social_account_ids provided, resolve all matching active accounts
+      if (social_account_ids && social_account_ids.length > 0) {
+        const rows = await query<{ id: string; platform: string; external_account_id: string; status: string; username: string }>`
           SELECT id, platform, external_account_id, status, username
           FROM social_accounts
           WHERE business_id = ${business.id}
-            AND LOWER(platform) = LOWER(${primaryPlatform})
+            AND deleted_at IS NULL
             AND status = 'connected'
-            AND deleted_at IS NULL
-          ORDER BY connected_at DESC
-          LIMIT 1
         `;
-        if (sa) {
-          account = {
-            id: sa.id,
-            platform: sa.platform,
-            zernio_account_id: sa.external_account_id,
-            status: sa.status,
-            platform_handle: sa.username,
-          };
+        const idSet = new Set(social_account_ids);
+        for (const row of rows) {
+          if (idSet.has(row.id)) {
+            targetAccounts.push({
+              id: row.id,
+              platform: row.platform,
+              zernio_account_id: row.external_account_id,
+              status: row.status,
+              platform_handle: row.username,
+            });
+          }
         }
       }
 
-      // Legacy fallback
-      if (!account) {
-        const legacy = await queryOne<ConnectedAccountRow>`
-          SELECT id, platform, zernio_account_id, status, platform_handle
-          FROM connected_accounts
-          WHERE business_id = ${business.id}
-            AND LOWER(platform) = LOWER(${primaryPlatform})
-            AND deleted_at IS NULL
-        `;
-        if (legacy) {
-          account = legacy;
+      // 2. Fallback to resolving by platforms / single social_account_id
+      if (targetAccounts.length === 0) {
+        const targetSocialAccountId = parsed.data.social_account_id || post.social_account_id;
+        const requestedPlatforms = platforms && platforms.length > 0 ? platforms : ["Instagram"];
+
+        for (const p of requestedPlatforms) {
+          const pNorm = p.toLowerCase();
+          if (targetSocialAccountId) {
+            const sa = await queryOne<{ id: string; platform: string; external_account_id: string; status: string; username: string }>`
+              SELECT id, platform, external_account_id, status, username
+              FROM social_accounts
+              WHERE id = ${targetSocialAccountId}
+                AND business_id = ${business.id}
+                AND LOWER(platform) = ${pNorm}
+                AND deleted_at IS NULL
+            `;
+            if (sa) {
+              targetAccounts.push({
+                id: sa.id,
+                platform: sa.platform,
+                zernio_account_id: sa.external_account_id,
+                status: sa.status,
+                platform_handle: sa.username,
+              });
+              continue;
+            }
+          }
+
+          const sa = await queryOne<{ id: string; platform: string; external_account_id: string; status: string; username: string }>`
+            SELECT id, platform, external_account_id, status, username
+            FROM social_accounts
+            WHERE business_id = ${business.id}
+              AND LOWER(platform) = ${pNorm}
+              AND status = 'connected'
+              AND deleted_at IS NULL
+            ORDER BY connected_at DESC
+            LIMIT 1
+          `;
+          if (sa) {
+            targetAccounts.push({
+              id: sa.id,
+              platform: sa.platform,
+              zernio_account_id: sa.external_account_id,
+              status: sa.status,
+              platform_handle: sa.username,
+            });
+          }
         }
       }
 
-      if (!account || account.status !== "connected") {
+      if (targetAccounts.length === 0) {
         throw new AppError(
-          `Your ${primaryPlatform} account is not connected for "${business.name}". Please connect Instagram in Accounts first.`,
+          `No connected accounts found for "${business.name}". Please connect your accounts in the Accounts tab first.`,
           422
         );
       }
 
-      // Call Zernio
+      const resolvedPlatforms = Array.from(new Set(targetAccounts.map((a) => a.platform)));
+      const platformDisplay = resolvedPlatforms.join(", ") || "Instagram";
+
+      // Call Zernio with all target accounts
       const zernioResult = await callZernioPublish({
         post: { ...post, image_url: effectiveImageUrl },
-        account,
+        accounts: targetAccounts,
         timing,
         scheduledDate: scheduled_date,
         scheduledTime: scheduled_time,
@@ -194,11 +220,11 @@ export const publishPost = createServerFn({ method: "POST" })
       const [updatedPost] = await query<PostRow>`
         UPDATE posts SET
           status            = ${newStatus},
-          platform          = ${primaryPlatform},
+          platform          = ${platformDisplay},
           date              = ${timing === "now" ? localDate : (scheduled_date ?? null)},
           time              = ${timing === "now" ? localTime : (scheduled_time ?? null)},
           image_url         = COALESCE(${effectiveImageUrl ?? null}, image_url),
-          social_account_id = ${account.id},
+          social_account_id = ${targetAccounts[0]?.id ?? null},
           zernio_post_id    = ${zernioResult.postId ?? null},
           published_at      = ${timing === "now" ? new Date().toISOString() : null},
           error_message     = NULL
@@ -217,7 +243,7 @@ export const publishPost = createServerFn({ method: "POST" })
           ${timing === "now" ? "post.published" : "post.scheduled"},
           'post',
           ${post_id}::uuid,
-          ${JSON.stringify({ platforms, timing, scheduledAt: scheduledAtIso, zernioPostId: zernioResult.postId, socialAccountId: account.id })}::jsonb
+          ${JSON.stringify({ platforms: resolvedPlatforms, timing, scheduledAt: scheduledAtIso, zernioPostId: zernioResult.postId, socialAccountId: targetAccounts[0]?.id })}::jsonb
         )
       `;
 
@@ -274,7 +300,7 @@ export const syncPostStatus = createServerFn({ method: "POST" })
 
 async function callZernioPublish(opts: {
   post: PostRow;
-  account: ConnectedAccountRow;
+  accounts: Array<{ platform: string; zernio_account_id: string; platform_handle?: string | null }>;
   timing: "now" | "schedule";
   scheduledDate?: string | undefined;
   scheduledTime?: string | undefined;
@@ -284,19 +310,17 @@ async function callZernioPublish(opts: {
 
   if (!apiKey) {
     // No Zernio key — simulate success (dev mode)
-    log.publish(opts.account.platform, "ZERNIO_API_KEY not set — simulating publish in dev mode");
+    log.publish("Multi", "ZERNIO_API_KEY not set — simulating publish in dev mode");
     return { postId: `sim_${Date.now()}` };
   }
 
   const body: Record<string, unknown> = {
     content: opts.post.caption,
     mediaItems: [{ url: opts.post.image_url }],
-    platforms: [
-      {
-        platform: opts.post.platform.toLowerCase(),
-        accountId: opts.account.zernio_account_id,
-      },
-    ],
+    platforms: opts.accounts.map((acc) => ({
+      platform: acc.platform.toLowerCase(),
+      accountId: acc.zernio_account_id,
+    })),
   };
 
   if (opts.timing === "now") {
@@ -309,11 +333,11 @@ async function callZernioPublish(opts: {
     body["scheduledAt"] = scheduledAt;
   }
 
-  log.publish(opts.account.platform, `Calling Zernio POST ${baseUrl}/posts`, {
-    accountId: opts.account.zernio_account_id,
-    handle: opts.account.platform_handle || undefined,
+  const handles = opts.accounts.map((a) => `${a.platform}:@${a.platform_handle || a.zernio_account_id}`).join(", ");
+  log.publish("Multi", `Calling Zernio POST ${baseUrl}/posts for destinations [${handles}]`, {
+    destinations: opts.accounts.length,
     timing: opts.timing,
-    scheduledAt: body["scheduledAt"] as string || undefined,
+    scheduledAt: (body["scheduledAt"] as string) || undefined,
   });
 
   const response = await fetch(`${baseUrl}/posts`, {
@@ -326,9 +350,11 @@ async function callZernioPublish(opts: {
     signal: AbortSignal.timeout(20_000),
   });
 
+  const primaryLogPlatform = opts.accounts[0]?.platform || "Multi";
+
   if (!response.ok) {
     const text = await response.text();
-    log.publish(opts.account.platform, `Zernio Error (${response.status}): ${text.slice(0, 120)}`);
+    log.publish(primaryLogPlatform, `Zernio Error (${response.status}): ${text.slice(0, 120)}`);
     throw new ExternalServiceError("Zernio", `${response.status}: ${text}`);
   }
 
@@ -338,7 +364,7 @@ async function callZernioPublish(opts: {
     postId?: string;
   };
   const finalId = json.data?.post?._id ?? json.id ?? json.postId ?? null;
-  log.publish(opts.account.platform, "HTTP 200 OK: Post successfully published via Zernio", { zernioPostId: finalId });
+  log.publish(primaryLogPlatform, "HTTP 200 OK: Post successfully published via Zernio", { zernioPostId: finalId });
   return { postId: finalId };
 }
 

@@ -14,15 +14,21 @@ function ZernioCallbackPage() {
   const [status, setStatus] = useState<"processing" | "success" | "error">("processing");
   const [errorMessage, setErrorMessage] = useState("");
   const [accountHandle, setAccountHandle] = useState("");
+  const [connectedPlatform, setConnectedPlatform] = useState("Instagram");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const params = new URLSearchParams(window.location.search);
     const connectedParam = params.get("connected") || params.get("platform");
-    const platform = connectedParam
-      ? connectedParam.charAt(0).toUpperCase() + connectedParam.slice(1).toLowerCase()
-      : "Instagram";
+    let platform = "Instagram";
+    if (connectedParam) {
+      const lower = connectedParam.toLowerCase();
+      if (lower === "twitter" || lower === "x") platform = "X";
+      else if (lower === "facebook") platform = "Facebook";
+      else platform = "Instagram";
+    }
+    setConnectedPlatform(platform);
     const state = params.get("state") || undefined;
     const accountId = params.get("accountId") || params.get("account_id");
     const handle = params.get("username") || params.get("handle") || "connected";
@@ -37,7 +43,7 @@ function ZernioCallbackPage() {
     if (!accountId) {
       // If returned without accountId or in manual return
       setStatus("error");
-      setErrorMessage("No account ID returned from OAuth provider. Please ensure you approved all required permissions for your Instagram Business/Creator account.");
+      setErrorMessage(`No account ID returned from OAuth provider for ${platform}. Please ensure you approved all required permissions.`);
       return;
     }
 
@@ -61,7 +67,7 @@ function ZernioCallbackPage() {
           }, 2000);
         } else {
           setStatus("error");
-          setErrorMessage(res?.message || "Failed to register connected account");
+          setErrorMessage(res?.message || `Failed to register connected ${platform} account`);
         }
       })
       .catch((err) => {
@@ -78,7 +84,7 @@ function ZernioCallbackPage() {
             <LoaderCircle className="mx-auto h-12 w-12 animate-spin text-primary" />
             <h1 className="font-display text-2xl font-semibold">Completing OAuth Connection</h1>
             <p className="text-sm text-muted-foreground">
-              Linking your Instagram Professional account with PostPilot...
+              Linking your {connectedPlatform} account with PostPilot...
             </p>
           </div>
         )}
@@ -90,7 +96,7 @@ function ZernioCallbackPage() {
             </div>
             <h1 className="font-display text-2xl font-semibold">Account Connected!</h1>
             <p className="text-sm text-muted-foreground">
-              Your Instagram Professional account <span className="font-semibold text-foreground">@{accountHandle}</span> has been verified and connected.
+              Your {connectedPlatform} account <span className="font-semibold text-foreground">@{accountHandle}</span> has been verified and connected.
             </p>
             <p className="text-xs text-muted-foreground">Redirecting to workspace in a moment...</p>
             <Button className="mt-4 w-full gap-2" onClick={() => navigate({ to: "/" })}>

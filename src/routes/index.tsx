@@ -499,12 +499,12 @@ function PostPilot() {
     }
   };
 
-  const startInstagramOAuthForBiz = async (bizId: string) => {
+  const startOAuthForBiz = async (bizId: string, platform: Platform = "Instagram") => {
     try {
-      toast.info("Connecting Instagram account...");
+      toast.info(`Connecting ${platform} account...`);
       const res = await getZernioConnectUrl({
         data: {
-          platform: "Instagram",
+          platform,
           businessId: bizId,
           origin: typeof window !== "undefined" ? window.location.origin : undefined,
         },
@@ -514,10 +514,10 @@ function PostPilot() {
         window.location.href = url;
         return;
       }
-      const errMsg = (res as any)?.error?.message || (res as any)?.message || "Could not obtain connect URL from Zernio";
+      const errMsg = (res as any)?.error?.message || (res as any)?.message || `Could not obtain connect URL for ${platform}`;
       toast.error(errMsg);
     } catch (err: any) {
-      toast.error(err?.message || "Failed to initiate Instagram connect");
+      toast.error(err?.message || `Failed to initiate ${platform} connect`);
     }
   };
 
@@ -994,7 +994,7 @@ function PostPilot() {
                 userEmail={userEmail}
                 onRefresh={() => refreshWorkspace()}
                 onAccountsChange={setConnectedAccounts}
-                onConnect={(bizId) => startInstagramOAuthForBiz(bizId)}
+                onConnect={(bizId, platform) => startOAuthForBiz(bizId, platform)}
               />
             )}
             {page === "Settings" && (
@@ -1244,7 +1244,7 @@ function PostPilot() {
                     onClick={() => {
                       if (connectPromptBiz) {
                         setConnectPromptOpen(false);
-                        startInstagramOAuthForBiz(connectPromptBiz.id);
+                        startOAuthForBiz(connectPromptBiz.id, "Instagram");
                       }
                     }}
                   >
@@ -1627,9 +1627,8 @@ function CreateFlow({
 }) {
   const [step, setStep] = useState(1);
   const [selectedBizId, setSelectedBizId] = useState<string>(() => activeBusinessId || businesses[0]?.id || "");
-  const [selectedAccountId, setSelectedAccountId] = useState<string>(() => {
-    const defaultIg = connectedAccounts.find((a) => a.platform.toLowerCase() === "instagram");
-    return defaultIg?.id || connectedAccounts[0]?.id || "";
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>(() => {
+    return connectedAccounts.map((a) => a.id || a.handle).filter(Boolean) as string[];
   });
 
   // Keep in sync with incoming activeBusinessId
@@ -1640,11 +1639,21 @@ function CreateFlow({
   }, [activeBusinessId]);
 
   useEffect(() => {
-    const defaultIg = connectedAccounts.find((a) => a.platform.toLowerCase() === "instagram");
-    if (defaultIg?.id && !selectedAccountId) {
-      setSelectedAccountId(defaultIg.id);
+    if (connectedAccounts.length > 0) {
+      setSelectedAccountIds((prev) => {
+        const stillValid = prev.filter((id) =>
+          connectedAccounts.some((a) => (a.id || a.handle) === id)
+        );
+        return stillValid.length > 0
+          ? stillValid
+          : (connectedAccounts.map((a) => a.id || a.handle).filter(Boolean) as string[]);
+      });
+    } else {
+      setSelectedAccountIds([]);
     }
   }, [connectedAccounts]);
+
+  const selectedAccountId = selectedAccountIds[0] || "";
 
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState("Bold");
@@ -1661,6 +1670,17 @@ function CreateFlow({
   const [suggesting, setSuggesting] = useState(false);
   const [ownCaption, setOwnCaption] = useState(true);
   const [platforms, setPlatforms] = useState<Platform[]>(["Instagram"]);
+
+  // Automatically keep platforms synchronized with selected accounts
+  useEffect(() => {
+    const matched = connectedAccounts.filter((a) =>
+      selectedAccountIds.includes(a.id || a.handle)
+    );
+    const newPlatforms = Array.from(new Set(matched.map((a) => a.platform as Platform)));
+    if (newPlatforms.length > 0) {
+      setPlatforms(newPlatforms);
+    }
+  }, [selectedAccountIds, connectedAccounts]);
   const [timing, setTiming] = useState<"now" | "schedule">("now");
   const [scheduledDate, setScheduledDate] = useState("2026-10-18");
   const [scheduledTime, setScheduledTime] = useState("16:00");
@@ -1833,16 +1853,26 @@ function CreateFlow({
       }
     }
 
+    const chosenAccounts = connectedAccounts.filter((a) =>
+      selectedAccountIds.includes(a.id || a.handle)
+    );
+    const chosenPlatforms = Array.from(
+      new Set(chosenAccounts.map((a) => a.platform as Platform))
+    );
+    const finalPlatforms = chosenPlatforms.length > 0 ? chosenPlatforms : platforms.length > 0 ? platforms : ["Instagram" as Platform];
+
     const record = await publishPost({
       id: "pending",
       businessId: selectedBizId,
-      socialAccountId: selectedAccountId || undefined,
+      socialAccountId: selectedAccountIds[0] || undefined,
+      socialAccountIds: selectedAccountIds.length > 0 ? selectedAccountIds : undefined,
       headline,
       caption,
       date: targetDate,
       time: targetTime,
       status: timing === "now" ? "Posted" : "Scheduled",
-      platform: platforms[0] ?? "Instagram",
+      platform: finalPlatforms[0] ?? "Instagram",
+      platforms: finalPlatforms,
       theme: currentOption?.theme ?? "tomato",
       price,
       imageUrl: finalImageUrl,
@@ -1900,21 +1930,75 @@ function CreateFlow({
               </select>
             </div>
 
-            {/* Account Selection */}
+            {/* Account Multi-Selection */}
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Connected Instagram Account</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-medium text-muted-foreground">
+                  Post to Accounts {connectedAccounts.length > 0 && `(${selectedAccountIds.length}/${connectedAccounts.length} selected)`}
+                </label>
+                {connectedAccounts.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedAccountIds.length === connectedAccounts.length) {
+                        setSelectedAccountIds([]);
+                      } else {
+                        setSelectedAccountIds(connectedAccounts.map((a) => a.id || a.handle).filter(Boolean) as string[]);
+                      }
+                    }}
+                    className="text-[11px] font-medium text-primary hover:underline"
+                  >
+                    {selectedAccountIds.length === connectedAccounts.length ? "Deselect all" : "Select all"}
+                  </button>
+                )}
+              </div>
               {connectedAccounts.length > 0 ? (
-                <select
-                  value={selectedAccountId}
-                  onChange={(e) => setSelectedAccountId(e.target.value)}
-                  className="flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  {connectedAccounts.map((acc) => (
-                    <option key={acc.id || acc.handle} value={acc.id || acc.handle}>
-                      @{acc.handle} ({acc.platform})
-                    </option>
-                  ))}
-                </select>
+                <div className="flex flex-wrap gap-2">
+                  {connectedAccounts.map((acc) => {
+                    const accKey = acc.id || acc.handle;
+                    const isSelected = selectedAccountIds.includes(accKey);
+                    const isInstagram = acc.platform.toLowerCase() === "instagram";
+                    return (
+                      <button
+                        key={accKey}
+                        type="button"
+                        onClick={() => {
+                          setSelectedAccountIds((prev) =>
+                            prev.includes(accKey)
+                              ? prev.filter((id) => id !== accKey)
+                              : [...prev, accKey]
+                          );
+                        }}
+                        className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
+                          isSelected
+                            ? "border-primary bg-primary/10 text-primary ring-1 ring-primary shadow-sm"
+                            : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                        }`}
+                      >
+                        <div
+                          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                            isSelected
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-muted-foreground/40"
+                          }`}
+                        >
+                          {isSelected && <Check className="h-3 w-3 stroke-[3]" />}
+                        </div>
+                        <span className="flex items-center gap-1.5 font-semibold">
+                          {isInstagram ? (
+                            <Instagram className="h-3.5 w-3.5 text-pink-600 shrink-0" />
+                          ) : (
+                            <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white leading-none">f</span>
+                          )}
+                          @{acc.handle}
+                        </span>
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase font-normal text-muted-foreground">
+                          {acc.platform}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               ) : (
                 <div className="flex h-10 items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-xs text-amber-950 dark:text-amber-200">
                   <span className="truncate">No accounts linked</span>
@@ -1924,7 +2008,7 @@ function CreateFlow({
                     className="h-7 text-xs border-amber-600/40 text-amber-950 dark:text-amber-100 hover:bg-amber-500/20 shrink-0"
                     onClick={() => onNavigate("Accounts")}
                   >
-                    Connect Instagram first
+                    Connect account first
                   </Button>
                 </div>
               )}
@@ -1934,15 +2018,15 @@ function CreateFlow({
           {connectedAccounts.length === 0 && (
             <div className="mt-3 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs">
               <span className="text-amber-950 dark:text-amber-200">
-                <strong>{businessName}</strong> does not have an Instagram account connected yet.
+                <strong>{businessName}</strong> does not have a social account connected yet.
               </span>
               <Button
                 size="sm"
                 className="h-8 gap-1.5 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
                 onClick={() => onNavigate("Accounts")}
               >
-                <Instagram className="h-3.5 w-3.5" />
-                Connect Instagram first
+                <Sparkles className="h-3.5 w-3.5" />
+                Connect account first
               </Button>
             </div>
           )}
@@ -2006,6 +2090,9 @@ function CreateFlow({
         logoUrl={useBrand ? brandKit.logoUrl : undefined}
         font={brandKit.font}
         instagramAccount={activeInstagram}
+        connectedAccounts={connectedAccounts}
+        selectedAccountIds={selectedAccountIds}
+        onUpdateSelectedAccountIds={setSelectedAccountIds}
         option={currentOption}
         headline={headline}
         price={price}
@@ -2601,6 +2688,9 @@ function PublishStep({
   logoUrl,
   font,
   instagramAccount,
+  connectedAccounts = [],
+  selectedAccountIds = [],
+  onUpdateSelectedAccountIds,
   option,
   headline,
   price,
@@ -2626,6 +2716,9 @@ function PublishStep({
   logoUrl?: string | undefined;
   font?: string | undefined;
   instagramAccount?: { platform: string; handle: string } | undefined;
+  connectedAccounts?: Array<{ id?: string; platform: string; handle: string; status?: string }> | undefined;
+  selectedAccountIds?: string[] | undefined;
+  onUpdateSelectedAccountIds?: ((ids: string[]) => void) | undefined;
   option?: PosterOption | undefined;
   headline: string;
   price: string;
@@ -2743,27 +2836,103 @@ function PublishStep({
           </div>
         )}
         <div className="mt-6 border-t pt-5">
-          <div className="flex items-baseline justify-between">
-            <h3 className="text-sm font-semibold">Where should it go?</h3>
-            <span className="text-xs text-muted-foreground">Choose one or more</span>
+          <div className="flex items-baseline justify-between mb-2">
+            <div>
+              <h3 className="text-sm font-semibold">Where should it go?</h3>
+              <p className="text-xs text-muted-foreground">Select 1, multiple, or all accounts to publish</p>
+            </div>
+            {connectedAccounts.length > 1 && onUpdateSelectedAccountIds && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedAccountIds.length === connectedAccounts.length) {
+                    onUpdateSelectedAccountIds([]);
+                  } else {
+                    onUpdateSelectedAccountIds(connectedAccounts.map((a) => a.id || a.handle).filter(Boolean) as string[]);
+                  }
+                }}
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                {selectedAccountIds.length === connectedAccounts.length ? "Deselect all" : "Select all accounts"}
+              </button>
+            )}
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            {(["Instagram", "Facebook", "X"] as Platform[]).map((platform) => {
-              const connected = platform === "Instagram" ? Boolean(instagramAccount) : false;
-              return (
-                <button
-                  key={platform}
-                  onClick={() => togglePlatform(platform)}
-                  className={`flex min-h-[70px] flex-col items-center justify-center gap-1.5 border transition-colors ${platforms.includes(platform) ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}
-                  aria-pressed={platforms.includes(platform)}
-                >
-                  <span className="text-sm font-semibold">{platform === "Instagram" ? <Instagram className="h-[18px] w-[18px]" /> : platform === "Facebook" ? "f" : "𝕏"}</span>
-                  <span className="text-[11px]">{platform}</span>
-                  <span className={`text-[9px] ${connected ? "text-olive" : "text-muted-foreground"}`}>{connected ? "Connected" : "Optional"}</span>
-                </button>
-              );
-            })}
-          </div>
+
+          {connectedAccounts.length > 0 ? (
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {connectedAccounts.map((acc) => {
+                const accKey = acc.id || acc.handle;
+                const isSelected = selectedAccountIds.includes(accKey);
+                const isInstagram = acc.platform.toLowerCase() === "instagram";
+                return (
+                  <button
+                    key={accKey}
+                    type="button"
+                    onClick={() => {
+                      if (!onUpdateSelectedAccountIds) return;
+                      const next = isSelected
+                        ? selectedAccountIds.filter((id) => id !== accKey)
+                        : [...selectedAccountIds, accKey];
+                      onUpdateSelectedAccountIds(next);
+                    }}
+                    className={`flex items-center justify-between p-3.5 border rounded-lg transition-all text-left ${
+                      isSelected
+                        ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary"
+                        : "border-border hover:border-primary/40 opacity-75"
+                    }`}
+                    aria-pressed={isSelected}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                          isSelected
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-muted-foreground/40"
+                        }`}
+                      >
+                        {isSelected && <Check className="h-3 w-3 stroke-[3]" />}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 font-semibold text-xs truncate">
+                          {isInstagram ? (
+                            <Instagram className="h-3.5 w-3.5 text-pink-600 shrink-0" />
+                          ) : (
+                            <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white leading-none">f</span>
+                          )}
+                          <span className="truncate">@{acc.handle}</span>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-medium">
+                          {acc.platform}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-medium text-olive shrink-0 ml-2">Connected</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              {(["Instagram", "Facebook"] as Platform[]).map((platform) => {
+                const isSelected = platforms.includes(platform);
+                return (
+                  <button
+                    key={platform}
+                    type="button"
+                    onClick={() => togglePlatform(platform)}
+                    className={`flex min-h-[70px] flex-col items-center justify-center gap-1.5 border transition-all ${
+                      isSelected ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary" : "border-border hover:border-primary/40 opacity-75"
+                    }`}
+                    aria-pressed={isSelected}
+                  >
+                    <span className="text-sm font-semibold">{platform === "Instagram" ? <Instagram className="h-[18px] w-[18px]" /> : "f"}</span>
+                    <span className="text-[11px] font-medium">{platform}</span>
+                    <span className="text-[10px] text-muted-foreground">Not linked</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
         <div className="mt-6 border-t pt-5">
           <h3 className="text-sm font-semibold">When would you like it to go out?</h3>
@@ -2781,7 +2950,13 @@ function PublishStep({
         </div>
         <div className="mt-6 flex flex-wrap justify-between gap-2 border-t pt-5">
           <Button variant="outline" onClick={onBack}>Back to poster</Button>
-          <Button className="h-10 gap-2" onClick={onSubmit}>{timing === "now" ? "Post now" : "Schedule post"}<ArrowRight className="h-4 w-4" /></Button>
+          <Button
+            className="h-10 gap-2"
+            disabled={connectedAccounts.length > 0 && selectedAccountIds.length === 0}
+            onClick={onSubmit}
+          >
+            {timing === "now" ? "Post now" : "Schedule post"}<ArrowRight className="h-4 w-4" />
+          </Button>
         </div>
       </section>
     </div>
@@ -2980,7 +3155,7 @@ function PostedPage({
     <>
       <ScreenTitle eyebrow="A LITTLE MOMENTUM" title="Posted history" description="Everything you've shared, all in one place." />
       <div className="mb-4 flex gap-1">
-        {(["All", "Instagram", "Facebook", "X"] as const).map((item) => (
+        {(["All", "Instagram", "Facebook"] as const).map((item) => (
           <Button key={item} variant={filter === item ? "secondary" : "ghost"} size="sm" onClick={() => setFilter(item)} aria-pressed={filter === item}>
             {item}
           </Button>
@@ -3292,7 +3467,7 @@ function BrandKit({
         if (res && res.success && res.publicUrl) {
           setLogoUrl(res.publicUrl);
           setLogoName(file.name);
-          toast.success("Logo uploaded to Supabase Storage!");
+          toast.success("Logo uploaded successfully!");
         } else {
           toast.error("Logo upload failed. Using local preview.");
         }
@@ -3424,7 +3599,7 @@ function BrandKit({
                     <div className="min-w-0">
                       <p className="text-sm font-semibold truncate">{logoName || "Brand Mark"}</p>
                       <span className="inline-flex items-center gap-1 mt-0.5 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-medium text-emerald-800">
-                        <Check className="h-3 w-3 text-emerald-600" /> Stored in Supabase Bucket
+                        <Check className="h-3 w-3 text-emerald-600" /> Stored in Cloud Storage (R2)
                       </span>
                     </div>
                   </div>
@@ -3459,9 +3634,9 @@ function BrandKit({
                   </div>
                 </div>
 
-                {/* Show direct Supabase CDN link as requested */}
+                {/* Show direct CDN link as requested */}
                 <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 min-w-0 max-w-full overflow-hidden">
-                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider shrink-0">Supabase Link</span>
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider shrink-0">CDN Link</span>
                   <div className="min-w-0 flex-1 overflow-hidden">
                     <p className="text-[11px] font-mono text-foreground/80 truncate select-all" title={logoUrl}>
                       {logoUrl}
@@ -3474,7 +3649,7 @@ function BrandKit({
                     className="h-6 px-2 text-[11px] gap-1 shrink-0 hover:bg-muted"
                     onClick={() => {
                       navigator.clipboard.writeText(logoUrl);
-                      toast.success("Supabase link copied to clipboard");
+                      toast.success("CDN link copied to clipboard");
                     }}
                   >
                     <Copy className="h-3 w-3" /> Copy
@@ -3486,13 +3661,13 @@ function BrandKit({
                 {uploadingLogo ? (
                   <div className="flex items-center gap-2 py-2">
                     <LoaderCircle className="h-5 w-5 animate-spin text-primary" />
-                    <span>Uploading to Supabase Storage...</span>
+                    <span>Uploading to Cloud Storage...</span>
                   </div>
                 ) : (
                   <>
                     <Upload className="h-5 w-5 text-muted-foreground" />
                     <span className="font-medium text-foreground">Click to upload your logo</span>
-                    <span className="text-[11px] text-muted-foreground">PNG, JPG, SVG or WEBP (Uploaded directly to Supabase CDN)</span>
+                    <span className="text-[11px] text-muted-foreground">PNG, JPG, SVG or WEBP (Uploaded directly to Cloud CDN)</span>
                   </>
                 )}
                 <input
@@ -3564,7 +3739,7 @@ function Accounts({
   userEmail: string;
   onRefresh?: () => void;
   onAccountsChange?: (accounts: any[]) => void;
-  onConnect?: (bizId: string) => void;
+  onConnect?: (bizId: string, platform?: Platform) => void;
 }) {
   const isMeetSoni = userEmail === "meetsoni1075@gmail.com";
   const [connectModalOpen, setConnectModalOpen] = useState(false);
@@ -3600,7 +3775,7 @@ function Accounts({
     setLoading(true);
     try {
       if (onConnect) {
-        onConnect(activeBusinessId);
+        onConnect(activeBusinessId, selectedPlatform);
         return;
       }
       const res = await getZernioConnectUrl({
@@ -3753,15 +3928,15 @@ function Accounts({
           )}
         </div>
 
-        {/* Facebook & X rows */}
-        {(["Facebook", "X"] as Platform[]).map((platform) => {
+        {/* Facebook row */}
+        {(["Facebook"] as Platform[]).map((platform) => {
           const acc = connectedAccounts.find((a) => a.platform.toLowerCase() === platform.toLowerCase());
           const connected = Boolean(acc);
           return (
             <div key={platform} className="flex flex-wrap items-center justify-between gap-4 py-5">
               <div className="flex items-center gap-4">
                 <span className="flex h-11 w-11 items-center justify-center rounded-lg border bg-card">
-                  <span className="text-lg font-bold">{platform === "Facebook" ? "f" : "𝕏"}</span>
+                  <span className="text-lg font-bold">f</span>
                 </span>
                 <div>
                   <p className="text-sm font-semibold">{platform}</p>
@@ -3800,7 +3975,8 @@ function Accounts({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="font-display text-2xl flex items-center gap-2">
-              <Instagram className="h-5 w-5 text-primary" />
+              {selectedPlatform === "Instagram" && <Instagram className="h-5 w-5 text-primary" />}
+              {selectedPlatform === "Facebook" && <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-600 text-white font-bold text-sm">f</span>}
               Connect {selectedPlatform} to {businessName}
             </DialogTitle>
             <DialogDescription>
@@ -3811,17 +3987,22 @@ function Accounts({
           <div className="my-2 space-y-4">
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-left text-xs leading-5 text-amber-950 dark:text-amber-200">
               <p className="font-semibold flex items-center gap-1.5 text-foreground">
-                <span className="text-amber-600 font-bold">⚠️</span> Professional Account Required
+                <span className="text-amber-600 font-bold">⚠️</span> {selectedPlatform} Account Requirement
               </p>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Meta Graph API and Zernio require an Instagram <strong>Business</strong> or <strong>Creator</strong> profile. Personal accounts are not supported by Meta's API.
+                {selectedPlatform === "Instagram" && (
+                  <>Meta Graph API and Zernio require an Instagram <strong>Business</strong> or <strong>Creator</strong> profile. Personal accounts are not supported by Meta's API.</>
+                )}
+                {selectedPlatform === "Facebook" && (
+                  <>Connect a <strong>Facebook Page</strong> that you manage. Meta Graph API allows automated publishing to Facebook Pages.</>
+                )}
               </p>
             </div>
 
             <div>
               <p className="mb-2 text-xs font-semibold text-foreground">Automated OAuth Flow via Zernio</p>
               <p className="mb-3 text-xs text-muted-foreground">
-                You will be redirected to Instagram to authorize posting for <strong>{businessName}</strong>. The connection will be mapped exclusively to this workspace.
+                You will be redirected to {selectedPlatform} to authorize posting for <strong>{businessName}</strong>. The connection will be mapped exclusively to this workspace.
               </p>
               <Button
                 type="button"

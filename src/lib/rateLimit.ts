@@ -81,6 +81,15 @@ const businessLimiter = () =>
     analytics: true,
   });
 
+/** 10 req / 60s — file & image upload endpoints (protects Cloudflare R2 quota) */
+const uploadLimiter = () =>
+  new Ratelimit({
+    redis: getRedis(),
+    limiter: Ratelimit.slidingWindow(10, "60 s"),
+    prefix: "pp:rl:upload",
+    analytics: true,
+  });
+
 // ─── In-Memory Fallback Limiter (Sliding Window) ──────────────────────────────
 interface MemoryBucket {
   timestamps: number[];
@@ -116,7 +125,7 @@ function checkMemoryRateLimit(key: string, maxRequests: number, windowSeconds: n
 
 // ─── Rate limit check helper ─────────────────────────────────────────────────
 
-export type RateLimitTier = "general" | "ai" | "auth" | "publish" | "business";
+export type RateLimitTier = "general" | "ai" | "auth" | "publish" | "business" | "upload";
 
 const TIER_LIMITS: Record<RateLimitTier, { max: number; seconds: number }> = {
   general: { max: 180, seconds: 60 },
@@ -124,6 +133,7 @@ const TIER_LIMITS: Record<RateLimitTier, { max: number; seconds: number }> = {
   auth: { max: 10, seconds: 60 },
   publish: { max: 30, seconds: 60 },
   business: { max: 60, seconds: 60 },
+  upload: { max: 15, seconds: 60 },
 };
 
 const LIMITERS: Record<RateLimitTier, () => Ratelimit> = {
@@ -132,6 +142,7 @@ const LIMITERS: Record<RateLimitTier, () => Ratelimit> = {
   auth: authLimiter,
   publish: publishLimiter,
   business: businessLimiter,
+  upload: uploadLimiter,
 };
 
 /**

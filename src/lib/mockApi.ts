@@ -5,12 +5,14 @@ export interface SocialPost {
   id: string;
   businessId?: string | undefined;
   socialAccountId?: string | null | undefined;
+  socialAccountIds?: string[] | undefined;
   headline: string;
   caption: string;
   date: string;
   time: string;
   status: PostStatus;
   platform: Platform;
+  platforms?: Platform[];
   theme: string;
   price: string;
   imageUrl?: string | undefined;
@@ -264,16 +266,17 @@ export async function publishPost(post: SocialPost): Promise<SocialPost> {
     });
 
     if (createRes?.success && createRes.post?.id) {
-      // 2. Publish via Zernio to Instagram
+      // 2. Publish via Zernio to all selected platforms
       const pubRes = await serverPublish({
         data: {
           post_id: createRes.post.id,
-          platforms: [post.platform],
+          platforms: post.platforms && post.platforms.length > 0 ? post.platforms : [post.platform],
+          social_account_ids: post.socialAccountIds,
+          social_account_id: post.socialAccountId ?? null,
           timing: post.status === "Posted" ? "now" : "schedule",
           scheduled_date: post.date,
           scheduled_time: post.time,
           business_id: post.businessId,
-          social_account_id: post.socialAccountId ?? null,
         },
       });
 
