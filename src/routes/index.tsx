@@ -560,11 +560,11 @@ function PostPilot() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b bg-background/95 backdrop-blur-sm">
+    <div className="min-h-screen bg-background text-foreground flex flex-col selection:bg-primary/25 selection:text-primary">
+      <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b border-white/[0.08] bg-background/80 backdrop-blur-xl">
         <div className="flex h-full items-center">
           {/* Logo block: exact width matches sidebar (w-[260px]) with matching border-r on desktop */}
-          <div className="flex h-full items-center gap-3 px-4 sm:px-6 md:w-[260px] md:border-r md:px-5">
+          <div className="flex h-full items-center gap-3 px-4 sm:px-6 md:w-[260px] md:border-r md:border-white/[0.08] md:px-5">
             <Button
               variant="ghost"
               size="icon"
@@ -575,14 +575,14 @@ function PostPilot() {
               {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </Button>
             <button
-              className="group flex items-center gap-2.5 text-left"
+              className="group flex items-center gap-2.5 text-left focus-visible:outline-none"
               onClick={() => navigate("Home")}
               aria-label="PostPilot home"
             >
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm transition-transform group-hover:scale-105">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-tr from-primary via-orange-500 to-rose-500 text-white shadow-md shadow-primary/25 transition-transform group-hover:scale-105 active:scale-95">
                 <Send className="h-4 w-4" />
               </span>
-              <span className="font-display text-[21px] font-medium leading-none tracking-tight">postpilot</span>
+              <span className="font-display text-[22px] font-semibold leading-none tracking-tight text-foreground">postpilot</span>
             </button>
           </div>
 
@@ -590,36 +590,36 @@ function PostPilot() {
           <div className="relative flex items-center px-2 sm:px-4">
             <Button
               variant="ghost"
-              className="h-9 gap-2 px-2.5 text-sm hover:bg-secondary"
+              className="h-9 gap-2.5 rounded-xl border border-white/[0.08] bg-secondary/40 px-3 text-xs font-medium text-foreground hover:bg-secondary/70 hover:border-primary/40 transition-all"
               onClick={() => setBusinessMenuOpen(!businessMenuOpen)}
               aria-expanded={businessMenuOpen}
             >
               {brandKit.logoUrl ? (
-                <div className="h-6 w-6 rounded overflow-hidden border border-primary/20 bg-white p-0.5 shrink-0 flex items-center justify-center">
+                <div className="h-5 w-5 rounded-md overflow-hidden border border-white/10 bg-white p-0.5 shrink-0 flex items-center justify-center shadow-xs">
                   <img src={brandKit.logoUrl} alt="Logo" className="h-full w-full object-contain" />
                 </div>
               ) : (
-                <span className="flex h-6 w-6 items-center justify-center rounded bg-primary/10 text-[11px] font-semibold text-primary">{businessInitial}</span>
+                <span className="flex h-5 w-5 items-center justify-center rounded-md bg-primary/20 text-[10px] font-bold text-primary">{businessInitial}</span>
               )}
-              <span className="font-medium max-w-[140px] truncate">{businessName}</span>
-              <span className="rounded border bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">Active</span>
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="font-semibold max-w-[140px] truncate">{businessName}</span>
+              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold text-emerald-400">Active</span>
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform duration-200" />
             </Button>
             {businessMenuOpen && (
-              <div className="absolute left-2 sm:left-4 top-11 z-50 w-72 rounded-xl border bg-popover p-2 shadow-xl animate-in fade-in-50 zoom-in-95">
-                <div className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+              <div className="absolute left-2 sm:left-4 top-11 z-50 w-72 rounded-2xl border border-white/[0.1] bg-card/95 p-2 shadow-2xl backdrop-blur-xl animate-in fade-in-50 zoom-in-95">
+                <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
                   <span>YOUR WORKSPACES</span>
                   <span className="text-[10px] text-muted-foreground font-mono">{businesses.length}/10</span>
                 </div>
-                <div className="max-h-56 overflow-y-auto space-y-0.5 py-1">
+                <div className="max-h-56 overflow-y-auto space-y-1 py-1">
                   {businesses.map((biz) => {
                     const isActive = biz.id === activeBusinessId || biz.name === businessName;
                     return (
                       <button
                         key={biz.id}
                         type="button"
-                        className={`w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-xs transition-colors ${
-                          isActive ? "bg-secondary font-medium text-foreground" : "hover:bg-secondary/60 text-muted-foreground hover:text-foreground"
+                        className={`w-full flex items-center justify-between rounded-xl px-2.5 py-2 text-xs transition-colors ${
+                          isActive ? "bg-primary/10 font-semibold text-primary border border-primary/20" : "hover:bg-secondary/60 text-muted-foreground hover:text-foreground"
                         }`}
                         onClick={() => handleSwitchBusiness(biz.id)}
                       >
@@ -627,7 +627,7 @@ function PostPilot() {
                           {biz.logo_url ? (
                             <img src={biz.logo_url} alt="" className="h-5 w-5 rounded object-contain border bg-white p-0.5 shrink-0" />
                           ) : (
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-primary/10 text-[10px] font-bold text-primary">
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-primary/15 text-[10px] font-bold text-primary">
                               {biz.name.charAt(0).toUpperCase()}
                             </span>
                           )}
@@ -635,7 +635,7 @@ function PostPilot() {
                         </span>
                         <div className="flex items-center gap-1.5 shrink-0">
                           {biz.connected_accounts_count > 0 ? (
-                            <span className="text-[10px] text-olive font-medium flex items-center gap-1">
+                            <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
                               <Instagram className="h-3 w-3" /> {biz.connected_accounts_count}
                             </span>
                           ) : (
@@ -647,10 +647,10 @@ function PostPilot() {
                     );
                   })}
                 </div>
-                <div className="border-t my-1" />
+                <div className="border-t border-white/[0.08] my-1.5" />
                 <Button
                   variant="ghost"
-                  className="w-full justify-start text-xs font-medium text-primary hover:text-primary hover:bg-primary/10 h-8"
+                  className="w-full justify-start text-xs font-semibold text-primary hover:text-primary hover:bg-primary/10 h-8 rounded-lg"
                   onClick={() => {
                     setBusinessMenuOpen(false);
                     setAddBusinessModalOpen(true);
@@ -660,7 +660,7 @@ function PostPilot() {
                 </Button>
                 <Button
                   variant="ghost"
-                  className="w-full justify-start text-xs text-muted-foreground hover:text-foreground h-8"
+                  className="w-full justify-start text-xs text-muted-foreground hover:text-foreground h-8 rounded-lg"
                   onClick={() => {
                     setBusinessMenuOpen(false);
                     navigate("Settings");
@@ -675,15 +675,15 @@ function PostPilot() {
 
         {/* Header Right */}
         <div className="relative flex items-center gap-3 px-4 sm:px-7">
-          <div className="hidden sm:flex items-center gap-2 rounded-full border bg-secondary/60 px-3 py-1 text-xs text-muted-foreground">
-            <span className={`h-2 w-2 rounded-full ${isInstagramConnected ? "bg-olive animate-pulse" : "bg-muted-foreground"}`} />
-            <span>{isInstagramConnected ? "Instagram connected" : "No social connected"}</span>
+          <div className="hidden sm:flex items-center gap-2 rounded-full border border-white/[0.08] bg-secondary/40 px-3 py-1 text-xs text-muted-foreground shadow-xs">
+            <span className={`h-2 w-2 rounded-full ${isInstagramConnected ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-muted-foreground/60"}`} />
+            <span className="font-medium text-[11px]">{isInstagramConnected ? "Instagram connected" : "No social connected"}</span>
           </div>
-          <span className="hidden text-xs text-muted-foreground lg:inline">Your week, at a glance</span>
+          <span className="hidden text-xs text-muted-foreground/80 lg:inline">Your week, at a glance</span>
           <Button
             variant="ghost"
             size="icon"
-            className="h-9 w-9 rounded-full overflow-hidden bg-secondary text-sm font-medium hover:ring-2 hover:ring-primary/20"
+            className="h-9 w-9 rounded-full overflow-hidden border border-white/[0.08] bg-secondary/60 text-sm font-semibold hover:border-primary/50 hover:ring-2 hover:ring-primary/20 transition-all"
             aria-label="Open account menu"
             onClick={() => setAccountMenuOpen(!accountMenuOpen)}
           >
@@ -699,19 +699,19 @@ function PostPilot() {
             )}
           </Button>
           {accountMenuOpen && (
-            <div className="absolute right-4 top-12 z-50 w-64 rounded-lg border bg-popover p-2 shadow-lg">
-              <div className="border-b px-2.5 pb-2.5 pt-1.5">
-                <p className="text-sm font-medium truncate">{userName}</p>
+            <div className="absolute right-4 top-12 z-50 w-64 rounded-2xl border border-white/[0.1] bg-card/95 p-2.5 shadow-2xl backdrop-blur-xl animate-in fade-in-50 zoom-in-95">
+              <div className="border-b border-white/[0.08] px-2.5 pb-2.5 pt-1">
+                <p className="text-sm font-semibold truncate text-foreground">{userName}</p>
                 <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
                 {activeUser && (
-                  <span className="mt-1.5 inline-flex items-center gap-1 rounded bg-olive/10 px-1.5 py-0.5 text-[10px] font-medium text-olive">
+                  <span className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
                     Google Connected
                   </span>
                 )}
               </div>
               <Button
                 variant="ghost"
-                className="mt-1 w-full justify-start text-xs"
+                className="mt-1.5 w-full justify-start text-xs rounded-lg"
                 onClick={() => {
                   setAccountMenuOpen(false);
                   navigate("Settings");
@@ -721,7 +721,7 @@ function PostPilot() {
               </Button>
               <Button
                 variant="ghost"
-                className="w-full justify-start text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                className="w-full justify-start text-xs rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
                 onClick={async () => {
                   setAccountMenuOpen(false);
                   try {
@@ -746,38 +746,38 @@ function PostPilot() {
 
       {mobileNavOpen && (
         <button
-          className="fixed inset-0 z-20 bg-foreground/20 backdrop-blur-xs md:hidden"
+          className="fixed inset-0 z-20 bg-black/60 backdrop-blur-xs md:hidden"
           aria-label="Close navigation"
           onClick={() => setMobileNavOpen(false)}
         />
       )}
       <div className="flex flex-1 w-full">
         <aside
-          className={`fixed inset-y-[68px] left-0 z-30 w-[260px] shrink-0 border-r bg-background transition-transform duration-200 md:sticky md:top-[68px] md:z-10 md:block md:h-[calc(100vh-68px)] md:translate-x-0 ${
-            mobileNavOpen ? "translate-x-0 shadow-xl" : "-translate-x-full"
+          className={`fixed inset-y-[68px] left-0 z-30 w-[260px] shrink-0 border-r border-white/[0.08] bg-sidebar/95 backdrop-blur-xl transition-transform duration-200 md:sticky md:top-[68px] md:z-10 md:block md:h-[calc(100vh-68px)] md:translate-x-0 ${
+            mobileNavOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
           }`}
         >
-          <div className="flex h-full flex-col justify-between overflow-y-auto px-3.5 py-5">
+          <div className="flex h-full flex-col justify-between overflow-y-auto px-4 py-6">
             {/* Top actions & navigation */}
             <div className="space-y-6">
               {/* Primary Create Button */}
               <div>
                 <Button
                   onClick={() => navigate("Create")}
-                  className={`h-10 w-full justify-center gap-2 font-medium shadow-sm transition-all ${
+                  className={`h-11 w-full justify-center gap-2 rounded-xl font-semibold shadow-lg transition-all duration-200 ${
                     page === "Create"
-                      ? "bg-primary text-primary-foreground ring-2 ring-primary/30"
-                      : "hover:opacity-95"
+                      ? "bg-gradient-to-r from-primary to-orange-500 text-white ring-2 ring-primary/40 shadow-primary/30"
+                      : "bg-gradient-to-r from-primary via-orange-500 to-rose-500 text-white shadow-primary/20 hover:shadow-primary/35 hover:brightness-105 active:scale-[0.98]"
                   }`}
                 >
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-4 w-4 stroke-[2.5]" />
                   <span>Create a post</span>
                 </Button>
               </div>
 
               {/* Workspace Navigation */}
               <div>
-                <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <p className="mb-2.5 px-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/80">
                   WORKSPACE
                 </p>
                 <nav className="space-y-1" aria-label="Workspace navigation">
@@ -797,26 +797,23 @@ function PostPilot() {
                       <button
                         key={name}
                         onClick={() => navigate(name)}
-                        className={`group relative flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm transition-all duration-150 ${
+                        className={`group relative flex h-10 w-full items-center gap-3 rounded-xl px-3.5 text-sm transition-all duration-150 ${
                           active
-                            ? "bg-secondary font-medium text-foreground"
-                            : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground font-normal"
+                            ? "bg-primary/10 font-semibold text-primary border border-primary/20 shadow-xs"
+                            : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground font-medium"
                         }`}
                         aria-current={active ? "page" : undefined}
                       >
-                        {active && (
-                          <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-primary" />
-                        )}
                         <Icon
-                          className={`h-[18px] w-[18px] transition-colors ${
-                            active ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                          className={`h-4 w-4 transition-colors ${
+                            active ? "text-primary stroke-[2.2]" : "text-muted-foreground group-hover:text-foreground"
                           }`}
                         />
                         <span>{name}</span>
                         {badge && (
                           <span
-                            className={`ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold ${
-                              active ? "bg-primary/10 text-primary" : "bg-secondary text-muted-foreground"
+                            className={`ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold ${
+                              active ? "bg-primary text-white" : "bg-secondary text-muted-foreground border border-border/60"
                             }`}
                           >
                             {badge}
@@ -830,7 +827,7 @@ function PostPilot() {
 
               {/* Manage Navigation */}
               <div>
-                <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <p className="mb-2.5 px-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/80">
                   PREFERENCES
                 </p>
                 <nav className="space-y-1" aria-label="Management navigation">
@@ -844,27 +841,21 @@ function PostPilot() {
                       <button
                         key={name}
                         onClick={() => navigate(name)}
-                        className={`group relative flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm transition-all duration-150 ${
+                        className={`group relative flex h-10 w-full items-center gap-3 rounded-xl px-3.5 text-sm transition-all duration-150 ${
                           active
-                            ? "bg-secondary font-medium text-foreground"
-                            : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground font-normal"
+                            ? "bg-primary/10 font-semibold text-primary border border-primary/20 shadow-xs"
+                            : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground font-medium"
                         }`}
                         aria-current={active ? "page" : undefined}
                       >
-                        {active && (
-                          <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-primary" />
-                        )}
                         <Icon
-                          className={`h-[18px] w-[18px] transition-colors ${
-                            active ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                          className={`h-4 w-4 transition-colors ${
+                            active ? "text-primary stroke-[2.2]" : "text-muted-foreground group-hover:text-foreground"
                           }`}
                         />
                         <span>{name}</span>
                         {dot && (
-                          <span className="ml-auto flex items-center gap-1.5 text-[10px] text-olive font-medium">
-                            <span className="h-1.5 w-1.5 rounded-full bg-olive animate-pulse" />
-                            Connected
-                          </span>
+                          <span className="ml-auto h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
                         )}
                       </button>
                     );
@@ -874,13 +865,13 @@ function PostPilot() {
             </div>
 
             {/* Bottom Account & Workspace Card */}
-            <div className="border-t pt-3">
+            <div className="border-t border-white/[0.08] pt-3">
               <button
                 onClick={() => setAccountMenuOpen(!accountMenuOpen)}
-                className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-secondary/70 group"
+                className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors hover:bg-secondary/60 group"
                 aria-expanded={accountMenuOpen}
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xs font-semibold text-primary overflow-hidden">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 text-xs font-semibold text-primary overflow-hidden">
                   {userAvatar ? (
                     <img
                       src={userAvatar}
@@ -893,10 +884,10 @@ function PostPilot() {
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium text-foreground">{userName}</p>
+                  <p className="truncate text-xs font-semibold text-foreground">{userName}</p>
                   <p className="truncate text-[11px] text-muted-foreground">{userEmail}</p>
                 </div>
-                <MoreHorizontal className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />
+                <MoreHorizontal className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
               </button>
             </div>
           </div>
@@ -1265,7 +1256,16 @@ function PostPilot() {
 }
 
 function ScreenTitle({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: string; action?: React.ReactNode }) {
-  return <div className="mb-8 flex flex-wrap items-end justify-between gap-4"><div>{eyebrow && <p className="mb-2 text-[11px] font-semibold uppercase text-primary">{eyebrow}</p>}<h1 className="font-display text-4xl font-medium leading-tight sm:text-[42px]">{title}</h1>{description && <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>}</div>{action}</div>;
+  return (
+    <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+      <div>
+        {eyebrow && <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-primary">{eyebrow}</p>}
+        <h1 className="font-display text-4xl font-semibold tracking-tight leading-tight sm:text-[42px] text-foreground">{title}</h1>
+        {description && <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>}
+      </div>
+      {action && <div className="flex items-center shrink-0">{action}</div>}
+    </div>
+  );
 }
 
 function Dashboard({
@@ -1291,90 +1291,110 @@ function Dashboard({
   const greetingName = userName ? userName.split(" ")[0] : "there";
   const todayLabel = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }).toUpperCase();
 
-  return <>
-    <ScreenTitle eyebrow={todayLabel} title={`Welcome back, ${greetingName}.`} description="Create, schedule, and publish attractive social posts with ease." action={<Button onClick={() => onNavigate("Create")} className="h-10 gap-2"><Plus className="h-4 w-4" /> Create a post</Button>} />
-    <section className="mb-8 grid gap-3 sm:grid-cols-3" aria-label="Posting overview">
-      <Stat label="Posts this month" value={String(postedCount)} note={postedCount > 0 ? `${postedCount} posts published` : "No posts published yet"} />
-      <Stat label="In the calendar" value={String(scheduledCount)} note={scheduledCount > 0 ? `${scheduledCount} posts queued` : "No scheduled posts"} />
-      <Stat
-        label="Connected channel"
-        value={instagramAccount ? "Instagram" : "None"}
-        note={instagramAccount ? `@${instagramAccount.handle} · Active` : "Connect in Accounts"}
-      />
-    </section>
-    <section className="mb-10 border bg-card p-5 sm:p-7">
-      <div className="grid items-center gap-6 md:grid-cols-[1fr_auto]">
-        <div>
-          <p className="mb-2 text-[11px] font-semibold uppercase text-primary">A FRESH IDEA</p>
-          <h2 className="font-display text-3xl leading-tight sm:text-[34px]">What would you like to share today?</h2>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">Start with an offer, an update, or a moment from your business. We'll help shape the poster and caption.</p>
-        </div>
-        <Button className="h-11 gap-2 self-center px-5" onClick={() => onNavigate("Create")}><Plus className="h-4 w-4" /> Start a new post</Button>
-      </div>
-      <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-4 text-xs text-muted-foreground">
-        {instagramAccount ? (
-          <span className="inline-flex items-center gap-1.5"><Instagram className="h-3.5 w-3.5" /> Instagram (@{instagramAccount.handle})</span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 text-muted-foreground"><Instagram className="h-3.5 w-3.5" /> No Instagram connected</span>
-        )}
-        <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" /> {instagramAccount ? "Ready to publish" : "Connect an account in Accounts"}</span>
-      </div>
-    </section>
-    <section>
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h2 className="font-display text-2xl">Recent posts</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Your recent created and published posts.</p>
-        </div>
-        {posts.length > 0 && (
-          <Button variant="ghost" className="gap-1.5 text-xs text-primary" onClick={() => onNavigate("Scheduled")}>
-            See your calendar <ArrowRight className="h-3.5 w-3.5" />
+  return (
+    <>
+      <ScreenTitle
+        eyebrow={todayLabel}
+        title={`Welcome back, ${greetingName}.`}
+        description="Create, schedule, and publish attractive social posts with ease."
+        action={
+          <Button onClick={() => onNavigate("Create")} className="h-11 px-6 rounded-xl font-semibold gap-2 shadow-lg shadow-primary/25 hover:shadow-primary/40">
+            <Plus className="h-4 w-4 stroke-[2.5]" /> Create a post
           </Button>
-        )}
-      </div>
-      {latestPosts.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {latestPosts.map((post) => (
-            <PostCard
-              key={post.id}
-              post={post}
-              businessName={businessName}
-              onSelectPost={onSelectPost}
-            />
-          ))}
-        </div>
-      ) : loadingPosts ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="animate-pulse border bg-card p-3.5 flex gap-4">
-              <div className="w-[92px] h-[115px] bg-secondary rounded" />
-              <div className="flex-1 space-y-2 py-2">
-                <div className="h-4 w-16 bg-secondary rounded" />
-                <div className="h-4 w-3/4 bg-secondary rounded" />
-                <div className="h-3 w-full bg-secondary rounded" />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <EmptyState
-          title="No posts yet."
-          message="Type your first post prompt to create and publish an attractive social poster."
-          action="Create your first post"
-          onAction={() => onNavigate("Create")}
+        }
+      />
+      <section className="mb-8 grid gap-4 sm:grid-cols-3" aria-label="Posting overview">
+        <Stat label="Posts this month" value={String(postedCount)} note={postedCount > 0 ? `${postedCount} posts published` : "No posts published yet"} />
+        <Stat label="In the calendar" value={String(scheduledCount)} note={scheduledCount > 0 ? `${scheduledCount} posts queued` : "No scheduled posts"} />
+        <Stat
+          label="Connected channel"
+          value={instagramAccount ? "Instagram" : "None"}
+          note={instagramAccount ? `@${instagramAccount.handle} · Active` : "Connect in Accounts"}
         />
-      )}
-    </section>
-    <div className="mt-9 flex flex-wrap items-center gap-5 border-t pt-5 text-xs text-muted-foreground">
-      <span>{postedCount} posts shared so far</span>
-      <span>•</span>
-      <span>Social posts made simple.</span>
-    </div>
-  </>;
+      </section>
+      <section className="relative mb-10 overflow-hidden rounded-2xl border border-white/[0.08] bg-gradient-to-br from-card via-card/85 to-secondary/40 p-6 sm:p-8 shadow-xl backdrop-blur-md">
+        <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-primary/10 blur-3xl pointer-events-none" />
+        <div className="grid items-center gap-6 md:grid-cols-[1fr_auto] relative z-10">
+          <div>
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-primary">A FRESH IDEA</p>
+            <h2 className="font-display text-3xl font-semibold leading-tight sm:text-[34px] text-foreground">What would you like to share today?</h2>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">Start with an offer, an update, or a moment from your business. We'll help shape the poster and caption.</p>
+          </div>
+          <Button className="h-11 gap-2 self-center px-6 rounded-xl font-semibold shadow-lg shadow-primary/25 hover:shadow-primary/40" onClick={() => onNavigate("Create")}>
+            <Plus className="h-4 w-4 stroke-[2.5]" /> Start a new post
+          </Button>
+        </div>
+        <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-white/[0.08] pt-4 text-xs text-muted-foreground">
+          {instagramAccount ? (
+            <span className="inline-flex items-center gap-2 font-medium text-foreground"><Instagram className="h-3.5 w-3.5 text-pink-500" /> Instagram (@{instagramAccount.handle})</span>
+          ) : (
+            <span className="inline-flex items-center gap-2 text-muted-foreground"><Instagram className="h-3.5 w-3.5" /> No Instagram connected</span>
+          )}
+          <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5 text-primary" /> {instagramAccount ? "Ready to publish" : "Connect an account in Accounts"}</span>
+        </div>
+      </section>
+      <section>
+        <div className="mb-5 flex items-center justify-between">
+          <div>
+            <h2 className="font-display text-2xl font-semibold text-foreground">Recent posts</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Your recent created and published posts.</p>
+          </div>
+          {posts.length > 0 && (
+            <Button variant="ghost" className="gap-1.5 text-xs text-primary font-semibold hover:text-primary hover:bg-primary/10 rounded-xl" onClick={() => onNavigate("Scheduled")}>
+              See your calendar <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
+        {latestPosts.length > 0 ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {latestPosts.map((post) => (
+              <PostCard
+                key={post.id}
+                post={post}
+                businessName={businessName}
+                onSelectPost={onSelectPost}
+              />
+            ))}
+          </div>
+        ) : loadingPosts ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="animate-pulse rounded-2xl border border-white/[0.08] bg-card/60 p-4 flex gap-4">
+                <div className="w-[96px] h-[120px] bg-secondary/80 rounded-xl" />
+                <div className="flex-1 space-y-2.5 py-2">
+                  <div className="h-4 w-16 bg-secondary/80 rounded-lg" />
+                  <div className="h-4 w-3/4 bg-secondary/80 rounded-lg" />
+                  <div className="h-3 w-full bg-secondary/80 rounded-lg" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="No posts yet."
+            message="Type your first post prompt to create and publish an attractive social poster."
+            action="Create your first post"
+            onAction={() => onNavigate("Create")}
+          />
+        )}
+      </section>
+      <div className="mt-10 flex flex-wrap items-center gap-5 border-t border-white/[0.08] pt-5 text-xs text-muted-foreground">
+        <span>{postedCount} posts shared so far</span>
+        <span>•</span>
+        <span>Social posts made simple.</span>
+      </div>
+    </>
+  );
 }
 
 function Stat({ label, value, note }: { label: string; value: string; note: string }) {
-  return <div className="border bg-card px-5 py-4"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-2 font-display text-3xl">{value}</p><p className="mt-1.5 text-xs text-muted-foreground">{note}</p></div>;
+  return (
+    <div className="group rounded-2xl border border-white/[0.08] bg-card/70 p-5 shadow-sm backdrop-blur-sm transition-all duration-200 hover:border-primary/40 hover:bg-card hover:shadow-xl hover:shadow-black/40">
+      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="mt-2.5 font-display text-3xl font-semibold text-foreground tracking-tight group-hover:text-primary transition-colors">{value}</p>
+      <p className="mt-1.5 text-xs text-muted-foreground/90">{note}</p>
+    </div>
+  );
 }
 
 function formatPostDate(dateStr?: string, timeStr?: string): string {
@@ -1526,7 +1546,26 @@ function Poster({
 }
 
 function StatusBadge({ status }: { status: PostStatus }) {
-  return <span className={`inline-flex items-center gap-1.5 border px-2 py-1 text-[10px] font-medium ${status === "Posted" ? "border-olive/25 bg-olive/10 text-olive" : status === "Scheduled" ? "border-sky/25 bg-sky/10 text-sky" : "border-border bg-secondary text-muted-foreground"}`}><span className={`h-1.5 w-1.5 rounded-full ${status === "Posted" ? "bg-olive" : status === "Scheduled" ? "bg-sky" : "bg-muted-foreground"}`} />{status}</span>;
+  const isPosted = status === "Posted";
+  const isScheduled = status === "Scheduled";
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-semibold border ${
+        isPosted
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+          : isScheduled
+          ? "border-sky-500/30 bg-sky-500/10 text-sky-400"
+          : "border-border bg-secondary/80 text-muted-foreground"
+      }`}
+    >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          isPosted ? "bg-emerald-400" : isScheduled ? "bg-sky-400" : "bg-muted-foreground"
+        }`}
+      />
+      {status}
+    </span>
+  );
 }
 
 function PostCard({
@@ -1542,12 +1581,12 @@ function PostCard({
   return (
     <article
       onClick={() => onSelectPost?.(post)}
-      className="group cursor-pointer overflow-hidden border bg-card transition-all duration-200 hover:border-primary/50 hover:shadow-md"
+      className="group cursor-pointer overflow-hidden rounded-2xl border border-white/[0.08] bg-card/70 p-4 shadow-sm backdrop-blur-sm transition-all duration-200 hover:border-primary/50 hover:bg-card hover:shadow-xl hover:shadow-black/50"
     >
-      <div className="grid grid-cols-[92px_1fr] gap-4 p-3.5">
-        <div className="w-[92px] shrink-0">
+      <div className="grid grid-cols-[96px_1fr] gap-4">
+        <div className="w-[96px] shrink-0">
           {post.imageUrl ? (
-            <div className="aspect-[4/5] w-full overflow-hidden rounded-md border bg-muted shadow-sm">
+            <div className="aspect-[4/5] w-full overflow-hidden rounded-xl border border-white/[0.08] bg-muted shadow-sm">
               <img
                 src={post.imageUrl}
                 alt={post.headline}
@@ -1565,13 +1604,13 @@ function PostCard({
             />
           )}
         </div>
-        <div className="flex min-w-0 flex-col py-1">
+        <div className="flex min-w-0 flex-col py-0.5">
           <div className="flex items-center justify-between gap-2">
             <StatusBadge status={post.status} />
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground"
               aria-label={`View details for ${post.headline}`}
               onClick={(e) => {
                 e.stopPropagation();
@@ -1581,18 +1620,18 @@ function PostCard({
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </div>
-          <h3 className="mt-3 line-clamp-2 text-sm font-semibold leading-5 group-hover:text-primary transition-colors">
+          <h3 className="mt-3 line-clamp-2 text-sm font-semibold leading-5 text-foreground group-hover:text-primary transition-colors">
             {post.headline}
           </h3>
           <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground whitespace-pre-line">
             {cleanCaptionDisplay(post.caption)}
           </p>
           <div className="mt-auto flex items-center justify-between pt-3 text-[11px] text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <Instagram className="h-3.5 w-3.5" />
+            <span className="flex items-center gap-1.5 font-medium">
+              <Instagram className="h-3.5 w-3.5 text-pink-500" />
               {dateLabel}
             </span>
-            <span className="text-[10px] text-primary font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+            <span className="text-[10px] text-primary font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
               View details →
             </span>
           </div>
@@ -1890,169 +1929,219 @@ function CreateFlow({
 
   const activeInstagram = connectedAccounts.find((a) => a.platform.toLowerCase() === "instagram");
 
-  return <>
-    <div className="mb-7 flex items-center justify-between gap-3"><div><button className="mb-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={onCancel}><ArrowLeft className="h-3.5 w-3.5" /> Back to workspace</button><h1 className="font-display text-4xl">Create a post</h1></div><span className="hidden text-xs text-muted-foreground sm:inline">A little idea can go a long way.</span></div>
-    <div className="mb-8 grid grid-cols-3 border-y" aria-label="Post creation steps">{steps.map((label, index) => <button key={label} onClick={() => index + 1 <= step && setStep(index + 1)} className={`relative flex items-center gap-2.5 py-3 text-left text-xs transition-colors ${step === index + 1 ? "font-semibold text-foreground" : step > index + 1 ? "text-primary" : "text-muted-foreground"}`} aria-current={step === index + 1 ? "step" : undefined}><span className={`flex h-6 w-6 items-center justify-center rounded-full border text-[11px] ${step === index + 1 ? "border-primary bg-primary text-primary-foreground" : step > index + 1 ? "border-primary bg-primary/10" : "border-border"}`}>{step > index + 1 ? <Check className="h-3.5 w-3.5" /> : index + 1}</span><span className="hidden sm:inline">{label}</span><span className="sm:hidden">{index === 0 ? "Describe" : index === 1 ? "Poster" : "Publish"}</span>{index < 2 && <span className="absolute right-0 top-1/2 hidden w-5 border-t sm:block" />}</button>)}</div>
-    {step === 1 && (
-      <section className="max-w-3xl border bg-card p-5 sm:p-8">
-        {/* POST TO SELECTOR */}
-        <div className="mb-6 rounded-xl border bg-secondary/40 p-4">
-          <div className="flex items-center justify-between mb-2.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <Send className="h-3.5 w-3.5 text-primary" />
-              POST TO
-            </span>
-            {onOpenAddBusiness && (
-              <button
-                type="button"
-                onClick={onOpenAddBusiness}
-                className="text-xs text-primary font-medium hover:underline flex items-center gap-1"
+  return (
+    <>
+      <div className="mb-7 flex items-center justify-between gap-3">
+        <div>
+          <button className="mb-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={onCancel}>
+            <ArrowLeft className="h-3.5 w-3.5" /> Back to workspace
+          </button>
+          <h1 className="font-display text-4xl font-semibold text-foreground tracking-tight">Create a post</h1>
+        </div>
+        <span className="hidden text-xs text-muted-foreground/80 sm:inline">A little idea can go a long way.</span>
+      </div>
+      <div className="mb-8 grid grid-cols-3 rounded-2xl border border-white/[0.08] bg-card/60 p-1.5 backdrop-blur-sm" aria-label="Post creation steps">
+        {steps.map((label, index) => {
+          const isCurrent = step === index + 1;
+          const isPassed = step > index + 1;
+          return (
+            <button
+              key={label}
+              onClick={() => index + 1 <= step && setStep(index + 1)}
+              className={`flex items-center justify-center gap-2.5 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all ${
+                isCurrent
+                  ? "bg-primary text-white shadow-md shadow-primary/25"
+                  : isPassed
+                  ? "text-primary hover:bg-primary/10"
+                  : "text-muted-foreground cursor-not-allowed opacity-60"
+              }`}
+              aria-current={isCurrent ? "step" : undefined}
+            >
+              <span
+                className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
+                  isCurrent
+                    ? "bg-white text-primary"
+                    : isPassed
+                    ? "bg-primary/20 text-primary"
+                    : "bg-secondary text-muted-foreground"
+                }`}
               >
-                <Plus className="h-3 w-3" /> Add business
-              </button>
+                {isPassed ? <Check className="h-3 w-3 stroke-[3]" /> : index + 1}
+              </span>
+              <span className="hidden sm:inline">{label}</span>
+              <span className="sm:hidden">{index === 0 ? "Describe" : index === 1 ? "Poster" : "Publish"}</span>
+            </button>
+          );
+        })}
+      </div>
+      {step === 1 && (
+        <section className="max-w-3xl rounded-2xl border border-white/[0.08] bg-card/80 p-6 sm:p-8 shadow-xl backdrop-blur-sm">
+          {/* POST TO SELECTOR */}
+          <div className="mb-6 rounded-xl border border-white/[0.08] bg-secondary/40 p-4">
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Send className="h-3.5 w-3.5 text-primary" />
+                POST TO
+              </span>
+              {onOpenAddBusiness && (
+                <button
+                  type="button"
+                  onClick={onOpenAddBusiness}
+                  className="text-xs text-primary font-semibold hover:underline flex items-center gap-1"
+                >
+                  <Plus className="h-3 w-3 stroke-[2.5]" /> Add business
+                </button>
+              )}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {/* Business selection */}
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1.5">Target Business</label>
+                <select
+                  value={selectedBizId}
+                  onChange={(e) => handleRequestSwitchBiz(e.target.value)}
+                  className="flex h-10 w-full rounded-xl border border-white/[0.08] bg-background px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
+                >
+                  {businesses.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Account Multi-Selection */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-muted-foreground">
+                    Post to Accounts {connectedAccounts.length > 0 && `(${selectedAccountIds.length}/${connectedAccounts.length} selected)`}
+                  </label>
+                  {connectedAccounts.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedAccountIds.length === connectedAccounts.length) {
+                          setSelectedAccountIds([]);
+                        } else {
+                          setSelectedAccountIds(connectedAccounts.map((a) => a.id || a.handle).filter(Boolean) as string[]);
+                        }
+                      }}
+                      className="text-[11px] font-semibold text-primary hover:underline"
+                    >
+                      {selectedAccountIds.length === connectedAccounts.length ? "Deselect all" : "Select all"}
+                    </button>
+                  )}
+                </div>
+                {connectedAccounts.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {connectedAccounts.map((acc) => {
+                      const accKey = acc.id || acc.handle;
+                      const isSelected = selectedAccountIds.includes(accKey);
+                      const isInstagram = acc.platform.toLowerCase() === "instagram";
+                      return (
+                        <button
+                          key={accKey}
+                          type="button"
+                          onClick={() => {
+                            setSelectedAccountIds((prev) =>
+                              prev.includes(accKey)
+                                ? prev.filter((id) => id !== accKey)
+                                : [...prev, accKey]
+                            );
+                          }}
+                          className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all ${
+                            isSelected
+                              ? "border-primary bg-primary/15 text-primary ring-1 ring-primary/40 shadow-xs"
+                              : "border-white/[0.08] bg-background/80 text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                          }`}
+                        >
+                          <div
+                            className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-md border ${
+                              isSelected
+                                ? "border-primary bg-primary text-white"
+                                : "border-muted-foreground/40"
+                            }`}
+                          >
+                            {isSelected && <Check className="h-3 w-3 stroke-[3]" />}
+                          </div>
+                          <span className="flex items-center gap-1.5">
+                            {isInstagram ? (
+                              <Instagram className="h-3.5 w-3.5 text-pink-500 shrink-0" />
+                            ) : (
+                              <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white leading-none">f</span>
+                            )}
+                            @{acc.handle}
+                          </span>
+                          <span className="rounded-md bg-muted px-1.5 py-0.5 text-[9px] uppercase font-bold text-muted-foreground">
+                            {acc.platform}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex h-10 items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 text-xs text-amber-200">
+                    <span className="truncate">No accounts linked</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs border-amber-500/40 text-amber-200 hover:bg-amber-500/20 shrink-0 rounded-lg"
+                      onClick={() => onNavigate("Accounts")}
+                    >
+                      Connect account
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {connectedAccounts.length === 0 && (
+              <div className="mt-3 flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs">
+                <span className="text-amber-200">
+                  <strong>{businessName}</strong> does not have a social account connected yet.
+                </span>
+                <Button
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs bg-primary text-white hover:bg-primary/90 rounded-lg"
+                  onClick={() => onNavigate("Accounts")}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Connect account first
+                </Button>
+              </div>
             )}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            {/* Business selection */}
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Target Business</label>
-              <select
-                value={selectedBizId}
-                onChange={(e) => handleRequestSwitchBiz(e.target.value)}
-                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                {businesses.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Account Multi-Selection */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-medium text-muted-foreground">
-                  Post to Accounts {connectedAccounts.length > 0 && `(${selectedAccountIds.length}/${connectedAccounts.length} selected)`}
-                </label>
-                {connectedAccounts.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (selectedAccountIds.length === connectedAccounts.length) {
-                        setSelectedAccountIds([]);
-                      } else {
-                        setSelectedAccountIds(connectedAccounts.map((a) => a.id || a.handle).filter(Boolean) as string[]);
-                      }
-                    }}
-                    className="text-[11px] font-medium text-primary hover:underline"
-                  >
-                    {selectedAccountIds.length === connectedAccounts.length ? "Deselect all" : "Select all"}
-                  </button>
-                )}
-              </div>
-              {connectedAccounts.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {connectedAccounts.map((acc) => {
-                    const accKey = acc.id || acc.handle;
-                    const isSelected = selectedAccountIds.includes(accKey);
-                    const isInstagram = acc.platform.toLowerCase() === "instagram";
-                    return (
-                      <button
-                        key={accKey}
-                        type="button"
-                        onClick={() => {
-                          setSelectedAccountIds((prev) =>
-                            prev.includes(accKey)
-                              ? prev.filter((id) => id !== accKey)
-                              : [...prev, accKey]
-                          );
-                        }}
-                        className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
-                          isSelected
-                            ? "border-primary bg-primary/10 text-primary ring-1 ring-primary shadow-sm"
-                            : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                        }`}
-                      >
-                        <div
-                          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                            isSelected
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "border-muted-foreground/40"
-                          }`}
-                        >
-                          {isSelected && <Check className="h-3 w-3 stroke-[3]" />}
-                        </div>
-                        <span className="flex items-center gap-1.5 font-semibold">
-                          {isInstagram ? (
-                            <Instagram className="h-3.5 w-3.5 text-pink-600 shrink-0" />
-                          ) : (
-                            <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white leading-none">f</span>
-                          )}
-                          @{acc.handle}
-                        </span>
-                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase font-normal text-muted-foreground">
-                          {acc.platform}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="flex h-10 items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-xs text-amber-950 dark:text-amber-200">
-                  <span className="truncate">No accounts linked</span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-xs border-amber-600/40 text-amber-950 dark:text-amber-100 hover:bg-amber-500/20 shrink-0"
-                    onClick={() => onNavigate("Accounts")}
-                  >
-                    Connect account first
-                  </Button>
-                </div>
-              )}
-            </div>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-primary">THE STARTING POINT</p>
+          <h2 className="mt-2 font-display text-3xl font-semibold text-foreground">What's happening at {businessName}?</h2>
+          <label htmlFor="post-prompt" className="sr-only">Describe your post</label>
+          <Textarea
+            id="post-prompt"
+            className="mt-5 min-h-[140px] resize-y rounded-2xl border border-white/[0.08] bg-secondary/50 px-4 py-4 text-base leading-7 placeholder:text-muted-foreground/60 focus:bg-background/90 focus:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/25 shadow-inner"
+            placeholder="Special announcement, offer, or new update from your business"
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+          />
+          <div className="mt-5 grid gap-5 border-t border-white/[0.08] pt-5 sm:grid-cols-2">
+            <ChoiceRow label="Style" choices={["Bold", "Minimal", "Festive", "Elegant"]} value={style} onChange={setStyle} />
+            <ChoiceRow label="Format" choices={["Square", "Portrait 4:5", "Story"]} value={format} onChange={setFormat} />
           </div>
-
-          {connectedAccounts.length === 0 && (
-            <div className="mt-3 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs">
-              <span className="text-amber-950 dark:text-amber-200">
-                <strong>{businessName}</strong> does not have a social account connected yet.
-              </span>
-              <Button
-                size="sm"
-                className="h-8 gap-1.5 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
-                onClick={() => onNavigate("Accounts")}
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                Connect account first
-              </Button>
+          <div className="mt-5 flex items-center justify-between border-t border-white/[0.08] pt-5">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Use my brand colors and logo</p>
+              <p className="mt-1 text-xs text-muted-foreground">Keep each post feeling like {businessName}.</p>
             </div>
-          )}
-        </div>
-
-        <p className="text-xs text-muted-foreground">THE STARTING POINT</p>
-        <h2 className="mt-2 font-display text-3xl">What's happening at {businessName}?</h2>
-        <label htmlFor="post-prompt" className="sr-only">Describe your post</label>
-        <Textarea id="post-prompt" className="mt-5 min-h-[150px] resize-y border-0 bg-secondary/60 px-4 py-4 text-base leading-7 shadow-none placeholder:text-muted-foreground focus-visible:ring-1" placeholder="Special announcement, offer, or new update from your business" value={prompt} onChange={(event) => setPrompt(event.target.value)} />
-        <div className="mt-5 grid gap-5 border-t pt-5 sm:grid-cols-2">
-          <ChoiceRow label="Style" choices={["Bold", "Minimal", "Festive", "Elegant"]} value={style} onChange={setStyle} />
-          <ChoiceRow label="Format" choices={["Square", "Portrait 4:5", "Story"]} value={format} onChange={setFormat} />
-        </div>
-        <div className="mt-5 flex items-center justify-between border-t pt-5">
-          <div>
-            <p className="text-sm font-medium">Use my brand colors and logo</p>
-            <p className="mt-1 text-xs text-muted-foreground">Keep each post feeling like {businessName}.</p>
+            <Switch checked={useBrand} onCheckedChange={setUseBrand} aria-label="Use my brand colors and logo" />
           </div>
-          <Switch checked={useBrand} onCheckedChange={setUseBrand} aria-label="Use my brand colors and logo" />
-        </div>
-        <div className="mt-6 flex items-center justify-between gap-3 border-t pt-5">
-          <p className="text-xs text-muted-foreground">You can edit every detail next.</p>
-          <Button className="h-10 gap-2" onClick={startGeneration}>Generate poster <ArrowRight className="h-4 w-4" /></Button>
-        </div>
-      </section>
-    )}
+          <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/[0.08] pt-5">
+            <p className="text-xs text-muted-foreground">You can edit every detail next.</p>
+            <Button className="h-11 px-6 rounded-xl font-semibold gap-2 shadow-lg shadow-primary/25 hover:shadow-primary/40" onClick={startGeneration}>
+              Generate poster <ArrowRight className="h-4 w-4 stroke-[2.5]" />
+            </Button>
+          </div>
+        </section>
+      )}
     {step === 2 && (
       <PosterStep
         businessName={businessName}
@@ -2181,11 +2270,36 @@ function CreateFlow({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  </>;
+    </>
+  );
 }
 
 function ChoiceRow({ label, choices, value, onChange }: { label: string; choices: string[]; value: string; onChange: (choice: string) => void }) {
-  return <div><p className="mb-2 text-xs font-medium">{label}</p><div className="flex flex-wrap gap-1.5">{choices.map((choice) => <Button key={choice} variant={value === choice ? "secondary" : "outline"} size="sm" className={`h-8 px-2.5 text-xs ${value === choice ? "border-primary/30 text-primary" : "font-normal text-muted-foreground"}`} onClick={() => onChange(choice)} aria-pressed={value === choice}>{choice}</Button>)}</div></div>;
+  return (
+    <div>
+      <p className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
+      <div className="flex flex-wrap gap-2">
+        {choices.map((choice) => {
+          const isSelected = value === choice;
+          return (
+            <button
+              key={choice}
+              type="button"
+              className={`h-9 px-4 rounded-xl text-xs font-semibold transition-all duration-150 border ${
+                isSelected
+                  ? "border-primary bg-primary/15 text-primary ring-1 ring-primary/40 shadow-xs"
+                  : "border-white/[0.08] bg-card/60 text-muted-foreground hover:border-primary/40 hover:text-foreground hover:bg-card"
+              }`}
+              onClick={() => onChange(choice)}
+              aria-pressed={isSelected}
+            >
+              {choice}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function PosterStep({
@@ -2388,16 +2502,20 @@ function PosterStep({
 
   return (
     <>
-      <div className="grid gap-8 lg:grid-cols-[1fr_310px]">
+      <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
         <div>
-          <p className="text-xs text-muted-foreground">A FEW DIRECTIONS TO TRY</p>
-          <h2 className="mt-2 font-display text-3xl">Choose the one that feels right.</h2>
-          <div className={`mt-5 grid gap-3 max-w-[540px] ${options.length <= 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4"}`}>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-primary">A FEW DIRECTIONS TO TRY</p>
+          <h2 className="mt-2 font-display text-3xl font-semibold text-foreground">Choose the one that feels right.</h2>
+          <div className={`mt-5 grid gap-4 max-w-[560px] ${options.length <= 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4"}`}>
             {options.map((item, index) => (
               <button
                 key={item.id}
                 onClick={() => onSelect(index)}
-                className={`group border bg-card p-2.5 text-left transition-colors relative ${selected === index ? "border-primary ring-1 ring-primary/40" : "border-border hover:border-primary/50"}`}
+                className={`group rounded-2xl border p-3 text-left transition-all duration-200 relative ${
+                  selected === index
+                    ? "border-primary bg-card/90 ring-2 ring-primary/40 shadow-xl shadow-primary/10"
+                    : "border-white/[0.08] bg-card/60 hover:border-primary/50 hover:bg-card/90 hover:shadow-lg"
+                }`}
                 aria-pressed={selected === index}
                 aria-label={`Select poster ${index + 1}`}
               >
@@ -2415,10 +2533,10 @@ function PosterStep({
                   imageUrl={item.imageUrl}
                   needsReview={item.needs_review}
                 />
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="block text-[11px] text-muted-foreground font-medium">Direction {index + 1}</span>
+                <div className="mt-2.5 flex items-center justify-between">
+                  <span className="block text-[11px] text-muted-foreground font-semibold">Direction {index + 1}</span>
                   {selected === index && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary">
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-primary">
                       <Sparkles className="h-3 w-3" /> Selected
                     </span>
                   )}
@@ -2427,18 +2545,18 @@ function PosterStep({
             ))}
           </div>
 
-          <div className="mt-5 flex flex-wrap items-center gap-2">
-            <Button variant="outline" className="gap-2" onClick={onRegenerate}>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <Button variant="outline" className="h-10 px-4 rounded-xl gap-2 font-medium" onClick={onRegenerate}>
               <Sparkles className="h-4 w-4" /> Try two more
             </Button>
             <Button
               variant="outline"
-              className="gap-2 text-primary border-primary/40 hover:bg-primary/5"
+              className="h-10 px-4 rounded-xl gap-2 text-primary border-primary/40 hover:bg-primary/10 hover:text-primary font-medium"
               onClick={focusAiEdit}
             >
               <Sparkles className="h-4 w-4 text-primary" /> Edit with AI
             </Button>
-            <Button variant="ghost" className="gap-2" onClick={savePoster}>
+            <Button variant="ghost" className="h-10 px-4 rounded-xl gap-2 font-medium hover:bg-secondary/60" onClick={savePoster}>
               <ArrowDownToLine className="h-4 w-4" /> Download
             </Button>
           </div>
@@ -2446,18 +2564,18 @@ function PosterStep({
 
         <div className="lg:sticky lg:top-24 lg:self-start">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">YOUR PICK</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">YOUR PICK</p>
             <Button
               variant="outline"
               size="sm"
-              className="h-7 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10"
+              className="h-7 text-[11px] gap-1 rounded-lg text-primary border-primary/30 hover:bg-primary/10 font-semibold"
               onClick={focusAiEdit}
             >
               <Sparkles className="h-3 w-3" /> Edit with AI
             </Button>
           </div>
 
-          <div className="mx-auto max-w-[270px] relative">
+          <div className="mx-auto max-w-[280px] rounded-2xl border border-white/[0.08] bg-card/75 p-3.5 shadow-2xl backdrop-blur-xl relative">
             <Poster
               theme={option.theme}
               eyebrow={option.eyebrow}
@@ -2473,7 +2591,7 @@ function PosterStep({
             />
 
             {aiEditing && (
-              <div className="absolute inset-0 bg-background/85 backdrop-blur-[2px] flex flex-col items-center justify-center p-4 rounded text-center gap-2 z-10 border border-primary/30">
+              <div className="absolute inset-0 bg-background/90 backdrop-blur-xs flex flex-col items-center justify-center p-4 rounded-2xl text-center gap-2 z-10 border border-primary/40">
                 <LoaderCircle className="h-6 w-6 animate-spin text-primary" />
                 <p className="text-xs font-semibold text-foreground">Applying changes with AI...</p>
                 <p className="text-[11px] text-muted-foreground">Refining design brief & rendering image</p>
@@ -2482,9 +2600,9 @@ function PosterStep({
           </div>
 
           {/* AI Image Edit Box right under YOUR PICK */}
-          <div className="mt-4 rounded-lg border border-primary/25 bg-card p-3 shadow-sm space-y-2.5">
+          <div className="mt-4 rounded-2xl border border-primary/25 bg-card/90 p-4 shadow-xl backdrop-blur-md space-y-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
                 <Sparkles className="h-3.5 w-3.5" />
                 <span>Edit this image with AI</span>
               </div>
@@ -2492,7 +2610,7 @@ function PosterStep({
                 <button
                   type="button"
                   onClick={() => setAiEditInstruction("")}
-                  className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                  className="text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
                   disabled={aiEditing}
                 >
                   Clear
@@ -2504,7 +2622,7 @@ function PosterStep({
               ref={aiEditInputRef}
               id="ai-edit-textarea-yourpick"
               aria-label="Describe changes to make to this image"
-              className="min-h-[80px] resize-none text-xs leading-5 border-border bg-background/80 placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-primary/50"
+              className="min-h-[85px] resize-none text-xs leading-5 rounded-xl border-white/[0.08] bg-background/80 placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-primary/25"
               placeholder={dynamicSuggestions.placeholder}
               value={aiEditInstruction}
               onChange={(e) => setAiEditInstruction(e.target.value)}
@@ -2512,9 +2630,9 @@ function PosterStep({
             />
 
             {/* Quick Suggestion Chips */}
-            <div className="space-y-1">
-              <p className="text-[10px] uppercase font-semibold text-muted-foreground">Quick Suggestions</p>
-              <div className="flex flex-wrap gap-1">
+            <div className="space-y-1.5">
+              <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Quick Suggestions</p>
+              <div className="flex flex-wrap gap-1.5">
                 {dynamicSuggestions.suggestions.map((suggestion) => (
                   <button
                     key={suggestion}
@@ -2524,7 +2642,7 @@ function PosterStep({
                         prev ? `${prev}. ${suggestion}` : suggestion
                       )
                     }
-                    className="rounded-full border border-border bg-secondary/50 px-2 py-0.5 text-[10px] text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors"
+                    className="rounded-lg border border-white/[0.08] bg-secondary/50 px-2.5 py-1 text-[10px] font-medium text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors"
                     disabled={aiEditing}
                   >
                     + {suggestion}
@@ -2535,7 +2653,7 @@ function PosterStep({
 
             <Button
               size="sm"
-              className="w-full gap-2 text-xs h-9 shadow-sm"
+              className="w-full gap-2 text-xs h-10 rounded-xl shadow-md font-semibold"
               onClick={handleAiEditSubmit}
               disabled={aiEditing || !aiEditInstruction.trim()}
             >
@@ -2553,12 +2671,12 @@ function PosterStep({
             </Button>
           </div>
 
-          <div className="mt-4 flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={onBack}>
+          <div className="mt-4 flex gap-3">
+            <Button variant="outline" className="flex-1 h-11 rounded-xl font-medium" onClick={onBack}>
               Back
             </Button>
-            <Button className="flex-1 gap-2" onClick={onContinue}>
-              Continue <ArrowRight className="h-4 w-4" />
+            <Button className="flex-1 gap-2 h-11 rounded-xl font-semibold shadow-lg shadow-primary/25 hover:shadow-primary/40" onClick={onContinue}>
+              Continue <ArrowRight className="h-4 w-4 stroke-[2.5]" />
             </Button>
           </div>
         </div>
@@ -2745,22 +2863,22 @@ function PublishStep({
   const displayHandle = instagramAccount?.handle ? `@${instagramAccount.handle}` : businessName.toLowerCase().replace(/\s+/g, ".");
 
   return (
-    <div className="grid gap-10 lg:grid-cols-[minmax(230px,0.8fr)_minmax(360px,1.2fr)]">
+    <div className="grid gap-10 lg:grid-cols-[minmax(250px,0.85fr)_minmax(380px,1.15fr)]">
       <section className="lg:sticky lg:top-24 lg:self-start">
-        <p className="mb-3 text-xs font-medium">A LITTLE PREVIEW</p>
-        <div className="mx-auto max-w-[300px] border bg-card p-3">
-          <div className="mb-3 flex items-center gap-2">
+        <p className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">A LITTLE PREVIEW</p>
+        <div className="mx-auto max-w-[320px] rounded-2xl border border-white/[0.08] bg-card/85 p-4 shadow-2xl backdrop-blur-xl">
+          <div className="mb-3.5 flex items-center gap-2.5">
             {logoUrl ? (
-              <div className="h-7 w-7 rounded-full overflow-hidden border border-primary/20 bg-white p-0.5 shrink-0 flex items-center justify-center">
+              <div className="h-7 w-7 rounded-full overflow-hidden border border-white/10 bg-white p-0.5 shrink-0 flex items-center justify-center shadow-xs">
                 <img src={logoUrl} alt="Logo" className="h-full w-full object-contain" />
               </div>
             ) : (
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
                 {initial}
               </span>
             )}
-            <span className="text-xs font-semibold">{displayHandle}</span>
-            <MoreHorizontal className="ml-auto h-4 w-4" />
+            <span className="text-xs font-semibold text-foreground truncate">{displayHandle}</span>
+            <MoreHorizontal className="ml-auto h-4 w-4 text-muted-foreground" />
           </div>
           <Poster
             theme={option?.theme ?? "tomato"}
@@ -2772,26 +2890,34 @@ function PublishStep({
             font={font}
             imageUrl={option?.imageUrl}
           />
-          <p className="mt-3 line-clamp-3 text-xs leading-5">
-            <span className="font-semibold">{displayHandle} </span>
+          <p className="mt-3.5 line-clamp-3 text-xs leading-5 text-foreground/90">
+            <span className="font-semibold text-foreground">{displayHandle} </span>
             {caption || "Your caption will show up here."}
           </p>
         </div>
       </section>
-      <section>
-        <p className="text-xs text-muted-foreground">ONE LAST THING</p>
-        <h2 className="mt-2 font-display text-3xl">Give it a voice.</h2>
-        <div className="mt-5 flex border-b" role="group" aria-label="Caption method">
+      <section className="rounded-2xl border border-white/[0.08] bg-card/80 p-6 sm:p-8 shadow-xl backdrop-blur-sm">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-primary">ONE LAST THING</p>
+        <h2 className="mt-2 font-display text-3xl font-semibold text-foreground">Give it a voice.</h2>
+        <div className="mt-5 grid grid-cols-2 rounded-xl border border-white/[0.08] bg-secondary/50 p-1" role="group" aria-label="Caption method">
           <Button
             variant="ghost"
-            className={`rounded-none border-b-2 px-3 text-xs ${ownCaption ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`}
+            className={`h-9 rounded-lg text-xs font-semibold transition-all ${
+              ownCaption
+                ? "bg-primary text-white shadow-sm shadow-primary/25"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
             onClick={() => onCaption(caption)}
           >
             Write my own
           </Button>
           <Button
             variant="ghost"
-            className={`rounded-none border-b-2 px-3 text-xs ${!ownCaption ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`}
+            className={`h-9 rounded-lg text-xs font-semibold transition-all ${
+              !ownCaption
+                ? "bg-primary text-white shadow-sm shadow-primary/25"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
             onClick={onSuggest}
           >
             Suggest captions
@@ -2802,43 +2928,47 @@ function PublishStep({
             <label htmlFor="caption-text" className="sr-only">Write a caption</label>
             <Textarea
               id="caption-text"
-              className="mt-3 min-h-32 resize-y text-sm leading-6"
+              className="mt-4 min-h-36 resize-y text-sm leading-6 rounded-2xl border-white/[0.08] bg-secondary/50 p-4 focus:bg-background/90"
               maxLength={2200}
               placeholder="A good caption that shares what's new and engages your followers…"
               value={caption}
               onChange={(event) => onCaption(event.target.value)}
             />
-            <div className="mt-1 text-right text-[11px] text-muted-foreground">{caption.length} / 2,200</div>
+            <div className="mt-1.5 text-right text-[11px] font-mono text-muted-foreground">{caption.length} / 2,200</div>
           </>
         ) : (
-          <div className="mt-3 space-y-2">
+          <div className="mt-4 space-y-2.5">
             {suggesting ? (
-              <div className="flex items-center gap-2 border p-5 text-sm text-muted-foreground">
-                <LoaderCircle className="h-4 w-4 animate-spin" /> Finding the right words…
+              <div className="flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-secondary/30 p-6 text-sm text-muted-foreground">
+                <LoaderCircle className="h-5 w-5 animate-spin text-primary" /> Finding the right words…
               </div>
             ) : (
               suggestions.map((item, index) => (
                 <button
                   key={item}
                   onClick={() => onChooseSuggestion(item)}
-                  className={`w-full border p-3 text-left text-xs leading-5 transition-colors ${caption === item ? "border-primary bg-primary/5" : "hover:border-primary/40"}`}
+                  className={`w-full rounded-xl border p-3.5 text-left text-xs leading-5 transition-all ${
+                    caption === item
+                      ? "border-primary bg-primary/10 shadow-xs ring-1 ring-primary/40 font-medium"
+                      : "border-white/[0.08] bg-secondary/30 hover:border-primary/40 text-muted-foreground hover:text-foreground"
+                  }`}
                 >
-                  <span className="mb-1 block text-[10px] font-semibold uppercase text-primary">Option {index + 1}</span>
+                  <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-primary">Option {index + 1}</span>
                   {item}
                 </button>
               ))
             )}
             {!suggesting && suggestions.length > 0 && (
-              <Button variant="ghost" size="sm" className="mt-1 h-8 px-1 text-xs text-primary" onClick={onSuggest}>
-                Regenerate suggestions
+              <Button variant="ghost" size="sm" className="mt-1 h-8 px-2 text-xs text-primary font-semibold hover:bg-primary/10" onClick={onSuggest}>
+                <Sparkles className="h-3.5 w-3.5 mr-1" /> Regenerate suggestions
               </Button>
             )}
           </div>
         )}
-        <div className="mt-6 border-t pt-5">
+        <div className="mt-6 border-t border-white/[0.08] pt-5">
           <div className="flex items-baseline justify-between mb-2">
             <div>
-              <h3 className="text-sm font-semibold">Where should it go?</h3>
+              <h3 className="text-sm font-semibold text-foreground">Where should it go?</h3>
               <p className="text-xs text-muted-foreground">Select 1, multiple, or all accounts to publish</p>
             </div>
             {connectedAccounts.length > 1 && onUpdateSelectedAccountIds && (
@@ -2851,7 +2981,7 @@ function PublishStep({
                     onUpdateSelectedAccountIds(connectedAccounts.map((a) => a.id || a.handle).filter(Boolean) as string[]);
                   }
                 }}
-                className="text-xs font-medium text-primary hover:underline"
+                className="text-xs font-semibold text-primary hover:underline"
               >
                 {selectedAccountIds.length === connectedAccounts.length ? "Deselect all" : "Select all accounts"}
               </button>
@@ -2875,18 +3005,18 @@ function PublishStep({
                         : [...selectedAccountIds, accKey];
                       onUpdateSelectedAccountIds(next);
                     }}
-                    className={`flex items-center justify-between p-3.5 border rounded-lg transition-all text-left ${
+                    className={`flex items-center justify-between p-3.5 rounded-xl border transition-all text-left ${
                       isSelected
-                        ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary"
-                        : "border-border hover:border-primary/40 opacity-75"
+                        ? "border-primary bg-primary/15 shadow-sm ring-1 ring-primary/40 font-semibold"
+                        : "border-white/[0.08] bg-secondary/30 hover:border-primary/40 text-muted-foreground hover:text-foreground"
                     }`}
                     aria-pressed={isSelected}
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div
-                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-md border ${
                           isSelected
-                            ? "border-primary bg-primary text-primary-foreground"
+                            ? "border-primary bg-primary text-white"
                             : "border-muted-foreground/40"
                         }`}
                       >
@@ -2895,18 +3025,18 @@ function PublishStep({
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 font-semibold text-xs truncate">
                           {isInstagram ? (
-                            <Instagram className="h-3.5 w-3.5 text-pink-600 shrink-0" />
+                            <Instagram className="h-3.5 w-3.5 text-pink-500 shrink-0" />
                           ) : (
                             <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white leading-none">f</span>
                           )}
                           <span className="truncate">@{acc.handle}</span>
                         </div>
-                        <span className="text-[10px] text-muted-foreground uppercase font-medium">
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold">
                           {acc.platform}
                         </span>
                       </div>
                     </div>
-                    <span className="text-[10px] font-medium text-olive shrink-0 ml-2">Connected</span>
+                    <span className="text-[10px] font-semibold text-emerald-400 shrink-0 ml-2">Connected</span>
                   </button>
                 );
               })}
@@ -2920,12 +3050,12 @@ function PublishStep({
                     key={platform}
                     type="button"
                     onClick={() => togglePlatform(platform)}
-                    className={`flex min-h-[70px] flex-col items-center justify-center gap-1.5 border transition-all ${
-                      isSelected ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary" : "border-border hover:border-primary/40 opacity-75"
+                    className={`flex min-h-[70px] flex-col items-center justify-center gap-1.5 rounded-xl border transition-all ${
+                      isSelected ? "border-primary bg-primary/15 shadow-sm ring-1 ring-primary/40" : "border-white/[0.08] bg-secondary/30 hover:border-primary/40 opacity-75"
                     }`}
                     aria-pressed={isSelected}
                   >
-                    <span className="text-sm font-semibold">{platform === "Instagram" ? <Instagram className="h-[18px] w-[18px]" /> : "f"}</span>
+                    <span className="text-sm font-semibold">{platform === "Instagram" ? <Instagram className="h-5 w-5 text-pink-500" /> : <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white">f</span>}</span>
                     <span className="text-[11px] font-medium">{platform}</span>
                     <span className="text-[10px] text-muted-foreground">Not linked</span>
                   </button>
@@ -2934,28 +3064,44 @@ function PublishStep({
             </div>
           )}
         </div>
-        <div className="mt-6 border-t pt-5">
-          <h3 className="text-sm font-semibold">When would you like it to go out?</h3>
-          <div className="mt-3 grid grid-cols-2 border">
-            <Button variant="ghost" className={`h-10 rounded-none ${timing === "now" ? "bg-secondary font-semibold" : "font-normal text-muted-foreground"}`} onClick={() => onTiming("now")} aria-pressed={timing === "now"}>Post now</Button>
-            <Button variant="ghost" className={`h-10 rounded-none ${timing === "schedule" ? "bg-secondary font-semibold" : "font-normal text-muted-foreground"}`} onClick={() => onTiming("schedule")} aria-pressed={timing === "schedule"}>Schedule</Button>
+        <div className="mt-6 border-t border-white/[0.08] pt-5">
+          <h3 className="text-sm font-semibold text-foreground">When would you like it to go out?</h3>
+          <div className="mt-3 grid grid-cols-2 rounded-xl border border-white/[0.08] bg-secondary/50 p-1">
+            <Button
+              variant="ghost"
+              className={`h-9 rounded-lg text-xs font-semibold transition-all ${timing === "now" ? "bg-primary text-white shadow-sm shadow-primary/25" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => onTiming("now")}
+              aria-pressed={timing === "now"}
+            >
+              Post now
+            </Button>
+            <Button
+              variant="ghost"
+              className={`h-9 rounded-lg text-xs font-semibold transition-all ${timing === "schedule" ? "bg-primary text-white shadow-sm shadow-primary/25" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => onTiming("schedule")}
+              aria-pressed={timing === "schedule"}
+            >
+              Schedule
+            </Button>
           </div>
           {timing === "schedule" && (
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="text-xs text-muted-foreground">Day<Input className="mt-1.5 text-foreground" type="date" value={scheduledDate} onChange={(event) => onDate(event.target.value)} /></label>
-              <label className="text-xs text-muted-foreground">Time<Input className="mt-1.5 text-foreground" type="time" value={scheduledTime} onChange={(event) => onTime(event.target.value)} /></label>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-semibold text-muted-foreground">Day<Input className="mt-1.5 text-foreground rounded-xl" type="date" value={scheduledDate} onChange={(event) => onDate(event.target.value)} /></label>
+              <label className="text-xs font-semibold text-muted-foreground">Time<Input className="mt-1.5 text-foreground rounded-xl" type="time" value={scheduledTime} onChange={(event) => onTime(event.target.value)} /></label>
               <p className="sm:col-span-2 text-xs text-muted-foreground">Times shown in your local timezone.</p>
             </div>
           )}
         </div>
-        <div className="mt-6 flex flex-wrap justify-between gap-2 border-t pt-5">
-          <Button variant="outline" onClick={onBack}>Back to poster</Button>
+        <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] pt-6">
+          <Button variant="outline" className="h-11 px-5 rounded-xl font-medium" onClick={onBack}>
+            <ArrowLeft className="h-4 w-4" /> Back to poster
+          </Button>
           <Button
-            className="h-10 gap-2"
+            className="h-11 px-7 rounded-xl font-semibold gap-2 shadow-lg shadow-primary/25 hover:shadow-primary/40"
             disabled={connectedAccounts.length > 0 && selectedAccountIds.length === 0}
             onClick={onSubmit}
           >
-            {timing === "now" ? "Post now" : "Schedule post"}<ArrowRight className="h-4 w-4" />
+            {timing === "now" ? "Post now" : "Schedule post"}<ArrowRight className="h-4 w-4 stroke-[2.5]" />
           </Button>
         </div>
       </section>
@@ -2984,72 +3130,99 @@ function ScheduledPage({
   const monthLabel = month.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const shiftMonth = (amount: number) => setMonth(new Date(month.getFullYear(), month.getMonth() + amount, 1));
 
-  return <>
-    <ScreenTitle eyebrow="YOUR CONTENT CALENDAR" title="Scheduled posts" description="A steady rhythm, without the last-minute rush." action={<Button onClick={onCreate} className="gap-2"><Plus className="h-4 w-4" /> New post</Button>} />
-    <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b pb-4">
-      <div className="flex gap-1">
-        <Button variant={view === "list" ? "secondary" : "ghost"} size="sm" className="gap-2" onClick={() => setView("list")} aria-pressed={view === "list"}>
-          <List className="h-4 w-4" /> List
-        </Button>
-        <Button variant={view === "calendar" ? "secondary" : "ghost"} size="sm" className="gap-2" onClick={() => setView("calendar")} aria-pressed={view === "calendar"}>
-          <CalendarDays className="h-4 w-4" /> Month
-        </Button>
-      </div>
-      {view === "calendar" && (
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Previous month" onClick={() => shiftMonth(-1)}>
-            <ChevronLeft className="h-4 w-4" />
+  return (
+    <>
+      <ScreenTitle
+        eyebrow="YOUR CONTENT CALENDAR"
+        title="Scheduled posts"
+        description="A steady rhythm, without the last-minute rush."
+        action={
+          <Button onClick={onCreate} className="h-11 px-6 rounded-xl font-semibold gap-2 shadow-lg shadow-primary/25 hover:shadow-primary/40">
+            <Plus className="h-4 w-4 stroke-[2.5]" /> New post
           </Button>
-          <span className="min-w-32 text-center text-sm font-medium">{monthLabel}</span>
-          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Next month" onClick={() => shiftMonth(1)}>
-            <ChevronRight className="h-4 w-4" />
+        }
+      />
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-4">
+        <div className="rounded-xl border border-white/[0.08] bg-secondary/50 p-1 flex gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`h-8 rounded-lg px-3 text-xs font-semibold gap-2 transition-all ${
+              view === "list" ? "bg-primary text-white shadow-xs" : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setView("list")}
+            aria-pressed={view === "list"}
+          >
+            <List className="h-3.5 w-3.5" /> List
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`h-8 rounded-lg px-3 text-xs font-semibold gap-2 transition-all ${
+              view === "calendar" ? "bg-primary text-white shadow-xs" : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setView("calendar")}
+            aria-pressed={view === "calendar"}
+          >
+            <CalendarDays className="h-3.5 w-3.5" /> Month
           </Button>
         </div>
-      )}
-    </div>
-    {view === "list" ? (
-      <div className="divide-y border-y">
-        {scheduled.length ? (
-          scheduled.map((post) => (
-            <ScheduledRow
-              key={post.id}
-              post={post}
-              businessName={businessName}
-              onReschedule={(nextDate) => onChange(posts.map((item) => item.id === post.id ? { ...item, date: nextDate } : item))}
-              onCancel={() => { onChange(posts.filter((item) => item.id !== post.id)); toast.success("Scheduled post cancelled"); }}
-              onSelectPost={onSelectPost}
-            />
-          ))
-        ) : (
-          <EmptyState title="Your calendar is clear." message="Create a post whenever a good idea comes along." action="Create a post" onAction={onCreate} />
+        {view === "calendar" && (
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" aria-label="Previous month" onClick={() => shiftMonth(-1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="min-w-32 text-center text-sm font-semibold text-foreground">{monthLabel}</span>
+            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" aria-label="Next month" onClick={() => shiftMonth(1)}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         )}
       </div>
-    ) : (
-      <div className="grid grid-cols-7 border-l border-t">
-        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-          <div key={day} className="border-b border-r bg-secondary/60 px-1 py-2 text-center text-[10px] text-muted-foreground sm:px-3 sm:text-xs">{day}</div>
-        ))}
-        {Array.from({ length: firstDay + daysInMonth }, (_, index) => {
-          const day = index - firstDay + 1;
-          const matches = scheduled.filter((post) => Number(post.date.slice(-2)) === day && Number(post.date.slice(5, 7)) === month.getMonth() + 1 && Number(post.date.slice(0, 4)) === month.getFullYear());
-          return (
-            <div key={index} className={`min-h-[76px] border-b border-r p-1 sm:min-h-28 sm:p-2 ${day < 1 ? "bg-secondary/25" : "bg-card"}`}>
-              <span className={`text-[10px] sm:text-xs ${day === 17 && month.getMonth() === 9 ? "flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground" : "text-muted-foreground"}`}>{day > 0 ? day : ""}</span>
-              {matches.map((post) => (
-                <button
-                  key={post.id}
-                  onClick={() => onSelectPost ? onSelectPost(post) : toast(`${post.headline} · ${post.time}`)}
-                  className="mt-1 block w-full truncate border-l-2 border-primary bg-primary/10 px-1 py-1 text-left text-[9px] text-foreground sm:text-[11px] hover:bg-primary/20"
-                >
-                  {post.headline}
-                </button>
-              ))}
-            </div>
-          );
-        })}
-      </div>
-    )}
-  </>;
+      {view === "list" ? (
+        <div className="space-y-3">
+          {scheduled.length ? (
+            scheduled.map((post) => (
+              <ScheduledRow
+                key={post.id}
+                post={post}
+                businessName={businessName}
+                onReschedule={(nextDate) => onChange(posts.map((item) => item.id === post.id ? { ...item, date: nextDate } : item))}
+                onCancel={() => { onChange(posts.filter((item) => item.id !== post.id)); toast.success("Scheduled post cancelled"); }}
+                onSelectPost={onSelectPost}
+              />
+            ))
+          ) : (
+            <EmptyState title="Your calendar is clear." message="Create a post whenever a good idea comes along." action="Create a post" onAction={onCreate} />
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-7 border-l border-t border-white/[0.08] rounded-2xl overflow-hidden shadow-xl">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+            <div key={day} className="border-b border-r border-white/[0.08] bg-secondary/70 px-1 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground sm:px-3 sm:text-xs">{day}</div>
+          ))}
+          {Array.from({ length: firstDay + daysInMonth }, (_, index) => {
+            const day = index - firstDay + 1;
+            const matches = scheduled.filter((post) => Number(post.date.slice(-2)) === day && Number(post.date.slice(5, 7)) === month.getMonth() + 1 && Number(post.date.slice(0, 4)) === month.getFullYear());
+            return (
+              <div key={index} className={`min-h-[76px] border-b border-r border-white/[0.08] p-1.5 sm:min-h-28 sm:p-2.5 ${day < 1 ? "bg-secondary/20" : "bg-card/70"}`}>
+                <span className={`text-[10px] sm:text-xs font-semibold ${day === 17 && month.getMonth() === 9 ? "flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white" : "text-muted-foreground"}`}>{day > 0 ? day : ""}</span>
+                {matches.map((post) => (
+                  <button
+                    key={post.id}
+                    onClick={() => onSelectPost ? onSelectPost(post) : toast(`${post.headline} · ${post.time}`)}
+                    className="mt-1.5 block w-full truncate rounded-md border-l-2 border-primary bg-primary/15 px-1.5 py-1 text-left text-[9px] font-medium text-foreground sm:text-[11px] hover:bg-primary/25 transition-colors"
+                  >
+                    {post.headline}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
 }
 
 function ScheduledRow({
@@ -3072,11 +3245,11 @@ function ScheduledRow({
   return (
     <article
       onClick={() => onSelectPost?.(post)}
-      className="group cursor-pointer grid gap-4 py-4 sm:grid-cols-[70px_1fr_auto] sm:items-center px-2 rounded-lg transition-colors hover:bg-secondary/40"
+      className="group cursor-pointer rounded-2xl border border-white/[0.08] bg-card/60 p-4 transition-all duration-200 hover:border-primary/40 hover:bg-card/90 hover:shadow-xl hover:shadow-black/40 grid gap-4 sm:grid-cols-[76px_1fr_auto] sm:items-center"
     >
-      <div className="w-[70px] shrink-0">
+      <div className="w-[76px] shrink-0">
         {post.imageUrl ? (
-          <div className="aspect-[4/5] w-full overflow-hidden rounded-md border bg-muted shadow-sm">
+          <div className="aspect-[4/5] w-full overflow-hidden rounded-xl border border-white/10 bg-secondary/40 shadow-md">
             <img
               src={post.imageUrl}
               alt={post.headline}
@@ -3085,52 +3258,54 @@ function ScheduledRow({
             />
           </div>
         ) : (
-          <Poster
-            theme={post.theme}
-            eyebrow={businessName.toUpperCase()}
-            headline={post.headline}
-            price={post.price}
-            footer="FRESH DAILY"
-          />
+          <div className="w-full rounded-xl overflow-hidden border border-white/10 shadow-md">
+            <Poster
+              theme={post.theme}
+              eyebrow={businessName.toUpperCase()}
+              headline={post.headline}
+              price={post.price}
+              footer="FRESH DAILY"
+            />
+          </div>
         )}
       </div>
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={post.status} />
-          <span className="text-xs text-muted-foreground">{post.platform}</span>
+          <span className="text-xs font-medium text-muted-foreground">{post.platform}</span>
         </div>
-        <h3 className="mt-2 text-sm font-semibold group-hover:text-primary transition-colors">
+        <h3 className="mt-2 text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
           {post.headline}
         </h3>
-        <p className="mt-1 line-clamp-1 text-xs text-muted-foreground whitespace-pre-line">
+        <p className="mt-1 line-clamp-1 text-xs text-muted-foreground whitespace-pre-line leading-relaxed">
           {cleanCaptionDisplay(post.caption)}
         </p>
-        <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <CalendarDays className="h-3.5 w-3.5" />
-          {displayDate}
+        <div className="mt-2.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <CalendarDays className="h-3.5 w-3.5 text-primary/70" />
+          <span>{displayDate}</span>
         </div>
       </div>
       <div
-        className="flex items-center gap-1"
+        className="flex items-center gap-2 shrink-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setEditing(!editing)}>
+        <Button variant="outline" size="sm" className="h-9 rounded-xl text-xs" onClick={() => setEditing(!editing)}>
           {editing ? "Close" : "Reschedule"}
         </Button>
-        <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={onCancel}>
+        <Button variant="ghost" size="sm" className="h-9 rounded-xl text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onCancel}>
           Cancel
         </Button>
       </div>
       {editing && (
         <div
-          className="flex items-end gap-2 border-t pt-3 sm:col-span-3"
+          className="flex items-end gap-2.5 border-t border-white/[0.08] pt-3 sm:col-span-3"
           onClick={(e) => e.stopPropagation()}
         >
-          <label className="text-xs text-muted-foreground">
-            New day
-            <Input className="mt-1 h-8" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          <label className="text-xs text-muted-foreground font-medium">
+            New scheduled date
+            <Input className="mt-1.5 h-9 rounded-xl" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           </label>
-          <Button size="sm" onClick={() => { onReschedule(date); setEditing(false); toast.success("Post rescheduled"); }}>
+          <Button size="sm" className="h-9 rounded-xl" onClick={() => { onReschedule(date); setEditing(false); toast.success("Post rescheduled"); }}>
             Save date
           </Button>
         </div>
@@ -3154,24 +3329,33 @@ function PostedPage({
   return (
     <>
       <ScreenTitle eyebrow="A LITTLE MOMENTUM" title="Posted history" description="Everything you've shared, all in one place." />
-      <div className="mb-4 flex gap-1">
+      <div className="mb-6 inline-flex rounded-xl border border-white/[0.08] bg-secondary/40 p-1.5 gap-1.5">
         {(["All", "Instagram", "Facebook"] as const).map((item) => (
-          <Button key={item} variant={filter === item ? "secondary" : "ghost"} size="sm" onClick={() => setFilter(item)} aria-pressed={filter === item}>
+          <Button
+            key={item}
+            variant={filter === item ? "secondary" : "ghost"}
+            size="sm"
+            className={`h-8 rounded-lg text-xs font-medium transition-all ${
+              filter === item ? "bg-card text-foreground shadow-sm border border-white/[0.08]" : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setFilter(item)}
+            aria-pressed={filter === item}
+          >
             {item}
           </Button>
         ))}
       </div>
-      <div className="divide-y border-y">
+      <div className="space-y-3">
         {posted.length ? (
           posted.map((post) => (
             <article
               key={post.id}
               onClick={() => onSelectPost?.(post)}
-              className="group cursor-pointer grid gap-4 py-4 sm:grid-cols-[72px_1fr_auto] sm:items-center px-2 rounded-lg transition-colors hover:bg-secondary/40"
+              className="group cursor-pointer rounded-2xl border border-white/[0.08] bg-card/60 p-4 transition-all duration-200 hover:border-primary/40 hover:bg-card/90 hover:shadow-xl hover:shadow-black/40 grid gap-4 sm:grid-cols-[76px_1fr_auto] sm:items-center"
             >
-              <div className="w-[72px] shrink-0">
+              <div className="w-[76px] shrink-0">
                 {post.imageUrl ? (
-                  <div className="aspect-[4/5] w-full overflow-hidden rounded-md border bg-muted shadow-sm">
+                  <div className="aspect-[4/5] w-full overflow-hidden rounded-xl border border-white/10 bg-secondary/40 shadow-md">
                     <img
                       src={post.imageUrl}
                       alt={post.headline}
@@ -3180,33 +3364,36 @@ function PostedPage({
                     />
                   </div>
                 ) : (
-                  <Poster
-                    theme={post.theme}
-                    eyebrow={businessName.toUpperCase()}
-                    headline={post.headline}
-                    price={post.price}
-                    footer="FRESH DAILY"
-                  />
+                  <div className="w-full rounded-xl overflow-hidden border border-white/10 shadow-md">
+                    <Poster
+                      theme={post.theme}
+                      eyebrow={businessName.toUpperCase()}
+                      headline={post.headline}
+                      price={post.price}
+                      footer="FRESH DAILY"
+                    />
+                  </div>
                 )}
               </div>
               <div className="min-w-0">
-                <h3 className="text-sm font-semibold group-hover:text-primary transition-colors">
+                <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
                   {post.headline}
                 </h3>
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground whitespace-pre-line">
+                <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground whitespace-pre-line">
                   {cleanCaptionDisplay(post.caption)}
                 </p>
-                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <Instagram className="h-3.5 w-3.5" />
-                  {post.platform} <span>·</span>
-                  {formatPostDate(post.date, post.time)}
+                <div className="mt-2.5 flex items-center gap-2 text-xs text-muted-foreground font-medium">
+                  <Instagram className="h-3.5 w-3.5 text-primary/70" />
+                  <span>{post.platform}</span>
+                  <span className="text-white/20">·</span>
+                  <span>{formatPostDate(post.date, post.time)}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="gap-2"
+                  className="h-9 rounded-xl gap-2 text-xs"
                   onClick={() => onSelectPost?.(post)}
                 >
                   <Eye className="h-3.5 w-3.5" /> View details
@@ -3217,7 +3404,7 @@ function PostedPage({
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    <Button variant="ghost" size="sm" className="gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+                    <Button variant="ghost" size="sm" className="h-9 rounded-xl gap-1.5 text-xs text-muted-foreground hover:text-foreground">
                       <ExternalLink className="h-3.5 w-3.5" /> Instagram
                     </Button>
                   </a>
@@ -3255,15 +3442,15 @@ function PostDetailModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto p-6">
-        <DialogHeader className="border-b pb-4">
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto p-6 rounded-2xl border-white/10 bg-card/95 backdrop-blur-2xl shadow-2xl">
+        <DialogHeader className="border-b border-white/[0.08] pb-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-secondary text-foreground">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-secondary/60 text-foreground border border-white/10">
                 {post.platform === "Instagram" ? (
-                  <Instagram className="h-4 w-4" />
+                  <Instagram className="h-4 w-4 text-rose-400" />
                 ) : (
-                  <span className="text-xs font-bold">{post.platform === "Facebook" ? "f" : "𝕏"}</span>
+                  <span className="text-xs font-bold text-sky-400">{post.platform === "Facebook" ? "f" : "𝕏"}</span>
                 )}
               </span>
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -3272,11 +3459,11 @@ function PostDetailModal({
               <StatusBadge status={post.status} />
             </div>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Clock3 className="h-3.5 w-3.5" />
+              <Clock3 className="h-3.5 w-3.5 text-primary/70" />
               <span>{formattedDateTime}</span>
             </div>
           </div>
-          <DialogTitle className="mt-3 font-display text-2xl font-semibold leading-snug text-left">
+          <DialogTitle className="mt-3 font-display text-2xl font-semibold leading-snug text-left text-foreground">
             {post.headline}
           </DialogTitle>
           <DialogDescription className="sr-only">
@@ -3288,7 +3475,7 @@ function PostDetailModal({
           {/* Left Column: Image or Poster Preview */}
           <div className="flex flex-col items-center">
             {post.imageUrl ? (
-              <div className="aspect-[4/5] w-full overflow-hidden rounded-xl border bg-muted shadow-md">
+              <div className="aspect-[4/5] w-full overflow-hidden rounded-2xl border border-white/10 bg-secondary/40 shadow-xl">
                 <img
                   src={post.imageUrl}
                   alt={post.headline}
@@ -3296,7 +3483,7 @@ function PostDetailModal({
                 />
               </div>
             ) : (
-              <div className="w-full shadow-md rounded-xl overflow-hidden">
+              <div className="w-full shadow-xl rounded-2xl overflow-hidden border border-white/10">
                 <Poster
                   theme={post.theme}
                   eyebrow={businessName.toUpperCase()}
@@ -3307,7 +3494,7 @@ function PostDetailModal({
               </div>
             )}
             {post.price && (
-              <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs font-semibold text-foreground">
+              <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-secondary/80 border border-white/[0.08] px-3.5 py-1 text-xs font-semibold text-foreground">
                 Offer / Price: {post.price}
               </div>
             )}
@@ -3323,21 +3510,21 @@ function PostDetailModal({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 gap-1.5 text-xs text-primary hover:text-primary/80"
+                  className="h-7 rounded-lg gap-1.5 text-xs text-primary hover:text-primary/80 hover:bg-primary/10"
                   onClick={handleCopyCaption}
                 >
                   <Copy className="h-3.5 w-3.5" /> Copy caption
                 </Button>
               </div>
 
-              <div className="rounded-xl border bg-secondary/30 p-4 max-h-[300px] overflow-y-auto">
+              <div className="rounded-2xl border border-white/[0.08] bg-secondary/30 p-4 max-h-[300px] overflow-y-auto">
                 <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground selection:bg-primary/20">
                   {cleanCaption}
                 </p>
               </div>
             </div>
 
-            <div className="rounded-lg border bg-card p-3 space-y-2 text-xs text-muted-foreground">
+            <div className="rounded-xl border border-white/[0.08] bg-secondary/20 p-3.5 space-y-2 text-xs text-muted-foreground">
               <div className="flex justify-between">
                 <span>Account:</span>
                 <span className="font-medium text-foreground">
@@ -3350,13 +3537,13 @@ function PostDetailModal({
               </div>
               <div className="flex justify-between">
                 <span>Status:</span>
-                <span className="font-medium text-olive">{post.status}</span>
+                <span className="font-medium text-emerald-400">{post.status}</span>
               </div>
             </div>
           </div>
         </div>
 
-        <DialogFooter className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+        <DialogFooter className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] pt-4">
           <div className="flex items-center gap-2">
             {post.platform === "Instagram" && (
               <a
@@ -3364,13 +3551,13 @@ function PostDetailModal({
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                <Button variant="outline" className="gap-2">
+                <Button variant="outline" className="h-10 rounded-xl gap-2 text-xs font-medium">
                   <Instagram className="h-4 w-4" /> View on Instagram <ExternalLink className="h-3.5 w-3.5" />
                 </Button>
               </a>
             )}
           </div>
-          <Button variant="default" onClick={onClose}>
+          <Button variant="default" className="h-10 rounded-xl px-6 font-medium" onClick={onClose}>
             Done
           </Button>
         </DialogFooter>
@@ -3489,15 +3676,15 @@ function BrandKit({
         title="Brand kit"
         description="A few details help every post feel like it came from you."
         action={
-          <Button onClick={handleSave} className="gap-2">
+          <Button onClick={handleSave} className="h-10 rounded-xl gap-2 font-medium shadow-md shadow-primary/20">
             <Check className="h-4 w-4" /> Save changes
           </Button>
         }
       />
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px] items-start w-full">
-        <div className="space-y-7 min-w-0 w-full">
-          <section className="border-b pb-6">
-            <h2 className="font-display text-2xl">The essentials</h2>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px] items-start w-full">
+        <div className="space-y-8 min-w-0 w-full">
+          <section className="border-b border-white/[0.08] pb-7">
+            <h2 className="font-display text-2xl font-semibold text-foreground">The essentials</h2>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <LabeledInput label="Business name" value={name} onChange={setName} />
               <LabeledInput label="Tagline" value={tagline} onChange={setTagline} />
@@ -3505,31 +3692,36 @@ function BrandKit({
               <LabeledInput label="Phone" value={phone} onChange={setPhone} />
             </div>
           </section>
-          <section className="border-b pb-6">
+          <section className="border-b border-white/[0.08] pb-7">
             <div className="flex items-baseline justify-between">
-              <h2 className="font-display text-2xl">Your colors</h2>
+              <h2 className="font-display text-2xl font-semibold text-foreground">Your colors</h2>
               <span className="text-xs text-muted-foreground">Pick up to three</span>
             </div>
-            <div className="mt-4 flex flex-wrap gap-3">
-              {palette.map((color) => (
-                <button
-                  key={color.name}
-                  onClick={() => toggleColor(color.name)}
-                  className={`flex items-center gap-2 border px-3 py-2 text-xs transition-colors ${
-                    colors.includes(color.name) ? "border-primary font-medium" : "border-border"
-                  }`}
-                  aria-pressed={colors.includes(color.name)}
-                >
-                  <span className={`brand-swatch ${color.className}`} />
-                  {color.name}
-                  {colors.includes(color.name) && <Check className="h-3 w-3 text-primary" />}
-                </button>
-              ))}
+            <div className="mt-4 flex flex-wrap gap-2.5">
+              {palette.map((color) => {
+                const isSelected = colors.includes(color.name);
+                return (
+                  <button
+                    key={color.name}
+                    onClick={() => toggleColor(color.name)}
+                    className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-xs font-medium transition-all ${
+                      isSelected
+                        ? "border-primary bg-primary/10 text-primary shadow-xs"
+                        : "border-white/[0.08] bg-secondary/30 text-muted-foreground hover:border-white/20 hover:text-foreground"
+                    }`}
+                    aria-pressed={isSelected}
+                  >
+                    <span className={`brand-swatch ${color.className}`} />
+                    <span>{color.name}</span>
+                    {isSelected && <Check className="h-3 w-3 text-primary ml-0.5" />}
+                  </button>
+                );
+              })}
             </div>
           </section>
-          <section className="pb-3">
+          <section className="border-b border-white/[0.08] pb-7">
             <div className="flex items-baseline justify-between">
-              <h2 className="font-display text-2xl">Heading style</h2>
+              <h2 className="font-display text-2xl font-semibold text-foreground">Heading style</h2>
               <span className="text-xs text-muted-foreground">Used for the big words on your posters</span>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">Select a typeface below to see your posters update in real-time.</p>
@@ -3538,74 +3730,77 @@ function BrandKit({
                 { name: "Fraunces", style: "Soft Editorial Serif", family: "'Fraunces', Georgia, serif" },
                 { name: "DM Serif", style: "Dramatic Display Serif", family: "'DM Serif Display', Georgia, serif" },
                 { name: "Work Sans", style: "Bold Modern Sans-Serif", family: "'Work Sans', sans-serif" },
-              ].map((item) => (
-                <button
-                  key={item.name}
-                  type="button"
-                  onClick={() => {
-                    setFont(item.name);
-                    toast.info(`Heading style set to ${item.name}`);
-                  }}
-                  className={`flex flex-col items-start rounded-lg border p-3.5 text-left transition-all ${
-                    font === item.name
-                      ? "border-primary bg-primary/5 ring-1 ring-primary shadow-xs"
-                      : "border-border bg-card hover:border-primary/50"
-                  }`}
-                  aria-pressed={font === item.name}
-                >
-                  <div className="flex w-full items-center justify-between">
-                    <span
-                      className="text-lg leading-tight"
+              ].map((item) => {
+                const isSelected = font === item.name;
+                return (
+                  <button
+                    key={item.name}
+                    type="button"
+                    onClick={() => {
+                      setFont(item.name);
+                      toast.info(`Heading style set to ${item.name}`);
+                    }}
+                    className={`flex flex-col items-start rounded-2xl border p-4 text-left transition-all ${
+                      isSelected
+                        ? "border-primary bg-primary/10 ring-1 ring-primary shadow-md shadow-primary/10"
+                        : "border-white/[0.08] bg-card/60 hover:border-primary/40 hover:bg-card/90"
+                    }`}
+                    aria-pressed={isSelected}
+                  >
+                    <div className="flex w-full items-center justify-between">
+                      <span
+                        className="text-lg leading-tight text-foreground"
+                        style={{
+                          fontFamily: item.family,
+                          fontWeight: item.name === "Work Sans" ? 700 : 600,
+                        }}
+                      >
+                        {item.name}
+                      </span>
+                      {isSelected && (
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white text-[10px]">
+                          <Check className="h-3 w-3" />
+                        </span>
+                      )}
+                    </div>
+                    <span className="mt-1 text-[11px] text-muted-foreground">
+                      {item.style}
+                    </span>
+                    <div
+                      className="mt-3 text-xs truncate max-w-full text-foreground/80 border-t border-white/[0.08] pt-2 w-full"
                       style={{
                         fontFamily: item.family,
-                        fontWeight: item.name === "Work Sans" ? 700 : 600,
+                        fontWeight: item.name === "Work Sans" ? 700 : 500,
                       }}
                     >
-                      {item.name}
-                    </span>
-                    {font === item.name && (
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white text-[10px]">
-                        <Check className="h-3 w-3" />
-                      </span>
-                    )}
-                  </div>
-                  <span className="mt-1 text-[11px] text-muted-foreground">
-                    {item.style}
-                  </span>
-                  <div
-                    className="mt-2 text-xs truncate max-w-full text-foreground/80 border-t pt-1.5 w-full"
-                    style={{
-                      fontFamily: item.family,
-                      fontWeight: item.name === "Work Sans" ? 700 : 500,
-                    }}
-                  >
-                    Turning ideas into reality
-                  </div>
-                </button>
-              ))}
+                      Turning ideas into reality
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </section>
           <section>
-            <h2 className="font-display text-2xl">Logo</h2>
+            <h2 className="font-display text-2xl font-semibold text-foreground">Logo</h2>
             <p className="mt-1 text-xs text-muted-foreground">Add your mark to the corner of a poster.</p>
             
             {logoUrl ? (
-              <div className="mt-4 rounded-lg border bg-card p-4 space-y-3">
+              <div className="mt-4 rounded-2xl border border-white/[0.08] bg-card/70 p-5 space-y-3.5 shadow-md">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border bg-white p-1.5 shadow-xs">
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white p-2 shadow-xs">
                       <img src={logoUrl} alt="Logo preview" className="h-full w-full object-contain" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate">{logoName || "Brand Mark"}</p>
-                      <span className="inline-flex items-center gap-1 mt-0.5 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-medium text-emerald-800">
-                        <Check className="h-3 w-3 text-emerald-600" /> Stored in Cloud Storage (R2)
+                      <p className="text-sm font-semibold text-foreground truncate">{logoName || "Brand Mark"}</p>
+                      <span className="inline-flex items-center gap-1 mt-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 text-[10px] font-medium text-emerald-400">
+                        <Check className="h-3 w-3 text-emerald-400" /> Stored in Cloud Storage (R2)
                       </span>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <label className="cursor-pointer">
-                      <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" asChild>
+                      <Button variant="outline" size="sm" className="h-9 rounded-xl text-xs gap-1.5" asChild>
                         <span>
                           <Upload className="h-3.5 w-3.5" />
                           {uploadingLogo ? "Uploading..." : "Replace"}
@@ -3622,7 +3817,7 @@ function BrandKit({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-8 text-xs text-destructive hover:bg-destructive/10"
+                      className="h-9 rounded-xl text-xs text-destructive hover:bg-destructive/10"
                       onClick={() => {
                         setLogoUrl("");
                         setLogoName("");
@@ -3634,8 +3829,8 @@ function BrandKit({
                   </div>
                 </div>
 
-                {/* Show direct CDN link as requested */}
-                <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 min-w-0 max-w-full overflow-hidden">
+                {/* Show direct CDN link */}
+                <div className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-secondary/30 px-3.5 py-2 min-w-0 max-w-full overflow-hidden">
                   <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider shrink-0">CDN Link</span>
                   <div className="min-w-0 flex-1 overflow-hidden">
                     <p className="text-[11px] font-mono text-foreground/80 truncate select-all" title={logoUrl}>
@@ -3646,7 +3841,7 @@ function BrandKit({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-6 px-2 text-[11px] gap-1 shrink-0 hover:bg-muted"
+                    className="h-7 px-2.5 rounded-lg text-[11px] gap-1 shrink-0 hover:bg-secondary/60"
                     onClick={() => {
                       navigator.clipboard.writeText(logoUrl);
                       toast.success("CDN link copied to clipboard");
@@ -3657,17 +3852,19 @@ function BrandKit({
                 </div>
               </div>
             ) : (
-              <label className="mt-4 flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 border border-dashed rounded-lg text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground bg-muted/10">
+              <label className="mt-4 flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 border-2 border-dashed border-white/10 rounded-2xl text-xs text-muted-foreground transition-all hover:border-primary/50 hover:bg-secondary/20 bg-secondary/10 p-6">
                 {uploadingLogo ? (
-                  <div className="flex items-center gap-2 py-2">
+                  <div className="flex items-center gap-2.5 py-2">
                     <LoaderCircle className="h-5 w-5 animate-spin text-primary" />
-                    <span>Uploading to Cloud Storage...</span>
+                    <span className="font-medium text-foreground">Uploading to Cloud Storage...</span>
                   </div>
                 ) : (
                   <>
-                    <Upload className="h-5 w-5 text-muted-foreground" />
-                    <span className="font-medium text-foreground">Click to upload your logo</span>
-                    <span className="text-[11px] text-muted-foreground">PNG, JPG, SVG or WEBP (Uploaded directly to Cloud CDN)</span>
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary/60 text-muted-foreground">
+                      <Upload className="h-5 w-5" />
+                    </span>
+                    <span className="font-medium text-sm text-foreground">Click to upload your logo</span>
+                    <span className="text-xs text-muted-foreground">PNG, JPG, SVG or WEBP (Uploaded directly to Cloud CDN)</span>
                   </>
                 )}
                 <input
@@ -3681,33 +3878,35 @@ function BrandKit({
             )}
           </section>
         </div>
-        <aside className="w-full lg:w-[280px] shrink-0 lg:sticky lg:top-24 lg:self-start">
-          <p className="mb-3 text-xs font-medium">A LITTLE PREVIEW</p>
-          <div className="border bg-card p-3 rounded-lg shadow-xs w-full max-w-[280px]">
-            <div className="mb-3 flex items-center gap-2">
+        <aside className="w-full lg:w-[300px] shrink-0 lg:sticky lg:top-24 lg:self-start">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Live Poster Preview</p>
+          <div className="rounded-2xl border border-white/[0.08] bg-card/70 backdrop-blur-xl p-4 shadow-xl shadow-black/30 w-full max-w-[300px]">
+            <div className="mb-3.5 flex items-center gap-2.5">
               {logoUrl ? (
-                <div className="h-7 w-7 rounded-full overflow-hidden border border-primary/20 bg-white p-0.5 shrink-0 flex items-center justify-center">
+                <div className="h-8 w-8 rounded-full overflow-hidden border border-primary/20 bg-white p-0.5 shrink-0 flex items-center justify-center">
                   <img src={logoUrl} alt="Logo" className="h-full w-full object-contain" />
                 </div>
               ) : (
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary shrink-0">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary shrink-0">
                   {(name || "B").charAt(0).toUpperCase()}
                 </span>
               )}
               <div className="min-w-0">
-                <p className="text-xs font-semibold truncate">{name || "Your business"}</p>
+                <p className="text-xs font-semibold text-foreground truncate">{name || "Your business"}</p>
                 {logoName && <p className="text-[10px] text-muted-foreground truncate">{logoName}</p>}
               </div>
             </div>
-            <Poster
-              theme={previewTheme}
-              eyebrow={location || (name ? name.toUpperCase() : "YOUR BRAND")}
-              headline="Turning ideas into reality"
-              price="Available now"
-              footer={tagline || "YOUR TAGLINE"}
-              logoUrl={logoUrl}
-              font={font}
-            />
+            <div className="rounded-xl overflow-hidden border border-white/10 shadow-md">
+              <Poster
+                theme={previewTheme}
+                eyebrow={location || (name ? name.toUpperCase() : "YOUR BRAND")}
+                headline="Turning ideas into reality"
+                price="Available now"
+                footer={tagline || "YOUR TAGLINE"}
+                logoUrl={logoUrl}
+                font={font}
+              />
+            </div>
             <p className="mt-3 text-[11px] text-muted-foreground">Typeface · <strong className="font-semibold text-foreground">{font}</strong></p>
           </div>
         </aside>
@@ -3717,7 +3916,12 @@ function BrandKit({
 }
 
 function LabeledInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label className="text-xs font-medium">{label}<Input className="mt-2 font-normal" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+  return (
+    <label className="text-xs font-medium text-foreground">
+      {label}
+      <Input className="mt-2 font-normal" value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
 }
 
 function Accounts({
@@ -3812,15 +4016,15 @@ function Accounts({
       />
 
       {/* Zernio Account Billing Notice */}
-      <div className="mb-6 max-w-3xl rounded-xl border bg-secondary/50 p-4">
+      <div className="mb-6 max-w-3xl rounded-2xl border border-white/[0.08] bg-card/70 backdrop-blur-xl p-4 shadow-lg shadow-black/20">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <span className={`h-2.5 w-2.5 rounded-full ${isFreeTier ? "bg-olive animate-pulse" : "bg-primary"}`} />
+          <div className="flex items-center gap-3">
+            <span className={`h-3 w-3 rounded-full ${isFreeTier ? "bg-emerald-500 shadow-sm shadow-emerald-500/50 animate-pulse" : "bg-primary shadow-sm shadow-primary/50"}`} />
             <div>
               <p className="text-xs font-semibold text-foreground">
                 Zernio Account Tier · {totalConnected} Connected Account{totalConnected === 1 ? "" : "s"} Total
               </p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
+              <p className="mt-0.5 text-[11px] text-muted-foreground leading-relaxed">
                 {billingInfo?.notice ||
                   (isFreeTier
                     ? "Free Tier active: First 2 connected accounts across your workspaces are included free."
@@ -3828,25 +4032,25 @@ function Accounts({
               </p>
             </div>
           </div>
-          <span className="rounded-full border bg-background px-2.5 py-1 text-[10px] font-mono font-medium text-muted-foreground">
+          <span className="rounded-full border border-white/[0.08] bg-secondary/50 px-3 py-1 text-[10px] font-mono font-medium text-foreground">
             {isFreeTier ? `${totalConnected}/2 Free Used` : `${totalConnected} Accounts Active`}
           </span>
         </div>
       </div>
 
-      <div className="max-w-3xl divide-y border-y">
+      <div className="max-w-3xl space-y-4">
         {/* Instagram Section */}
-        <div className="py-5">
+        <div className="rounded-2xl border border-white/[0.08] bg-card/60 backdrop-blur-xl p-5 shadow-lg shadow-black/20 transition-all hover:border-white/15">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <span className="flex h-11 w-11 items-center justify-center rounded-lg border bg-card text-foreground">
-                <Instagram className="h-5 w-5" />
+              <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/10 bg-secondary/40 text-foreground shadow-sm">
+                <Instagram className="h-6 w-6 text-rose-400" />
               </span>
               <div>
-                <p className="text-sm font-semibold flex items-center gap-2">
+                <p className="text-sm font-semibold text-foreground flex items-center gap-2">
                   Instagram Professional
                   {isInstagramActive && (
-                    <span className="rounded-full bg-olive/10 px-2 py-0.5 text-[10px] font-medium text-olive">
+                    <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 text-[10px] font-medium text-emerald-400">
                       Active
                     </span>
                   )}
@@ -3857,7 +4061,7 @@ function Accounts({
               </div>
             </div>
             <Button
-              className="gap-2"
+              className="h-10 rounded-xl gap-2 font-medium"
               onClick={() => {
                 setSelectedPlatform("Instagram");
                 setConnectModalOpen(true);
@@ -3870,7 +4074,7 @@ function Accounts({
 
           {/* Connected Instagram Accounts List */}
           {instagramAccounts.length > 0 && (
-            <div className="mt-4 space-y-2 border-t pt-3">
+            <div className="mt-5 space-y-2.5 border-t border-white/[0.08] pt-4">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Connected Handles for {businessName}:
               </p>
@@ -3880,18 +4084,18 @@ function Accounts({
                   return (
                     <div
                       key={acc.id || acc.handle}
-                      className="flex items-center justify-between rounded-lg border bg-card p-3"
+                      className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-secondary/30 p-3.5 transition-colors hover:bg-secondary/50"
                     >
                       <div className="flex items-center gap-3">
                         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
                           @
                         </span>
                         <div>
-                          <p className="text-xs font-medium text-foreground">@{acc.handle}</p>
+                          <p className="text-xs font-semibold text-foreground">@{acc.handle}</p>
                           <div className="flex items-center gap-1.5 mt-0.5">
                             <span
                               className={`h-1.5 w-1.5 rounded-full ${
-                                isExpired ? "bg-amber-500" : "bg-olive animate-pulse"
+                                isExpired ? "bg-amber-500" : "bg-emerald-500 animate-pulse"
                               }`}
                             />
                             <span className="text-[10px] text-muted-foreground capitalize">
@@ -3905,7 +4109,7 @@ function Accounts({
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-8 text-xs text-amber-600 border-amber-500/40 hover:bg-amber-500/10"
+                            className="h-8 rounded-xl text-xs text-amber-500 border-amber-500/40 hover:bg-amber-500/10"
                             onClick={() => onConnect?.(activeBusinessId || "")}
                           >
                             Reconnect
@@ -3914,7 +4118,7 @@ function Accounts({
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-8 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          className="h-8 rounded-xl text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
                           onClick={() => handleDisconnect(acc.id, "Instagram")}
                         >
                           Disconnect
@@ -3933,13 +4137,16 @@ function Accounts({
           const acc = connectedAccounts.find((a) => a.platform.toLowerCase() === platform.toLowerCase());
           const connected = Boolean(acc);
           return (
-            <div key={platform} className="flex flex-wrap items-center justify-between gap-4 py-5">
+            <div
+              key={platform}
+              className="rounded-2xl border border-white/[0.08] bg-card/60 backdrop-blur-xl p-5 shadow-lg shadow-black/20 flex flex-wrap items-center justify-between gap-4 transition-all hover:border-white/15"
+            >
               <div className="flex items-center gap-4">
-                <span className="flex h-11 w-11 items-center justify-center rounded-lg border bg-card">
-                  <span className="text-lg font-bold">f</span>
+                <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/10 bg-secondary/40">
+                  <span className="text-lg font-bold text-sky-400">f</span>
                 </span>
                 <div>
-                  <p className="text-sm font-semibold">{platform}</p>
+                  <p className="text-sm font-semibold text-foreground">{platform}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {connected ? `Connected · @${acc?.handle}` : "Not connected yet"}
                   </p>
@@ -3948,6 +4155,7 @@ function Accounts({
               <Button
                 variant={connected ? "outline" : "default"}
                 size="sm"
+                className="h-10 rounded-xl font-medium"
                 onClick={() => {
                   if (connected) {
                     handleDisconnect(acc?.id, platform);
@@ -3964,7 +4172,7 @@ function Accounts({
         })}
       </div>
 
-      <p className="mt-5 max-w-3xl border-l-2 border-primary/50 py-1 pl-4 text-xs leading-5 text-muted-foreground">
+      <p className="mt-6 max-w-3xl border-l-2 border-primary/50 py-1 pl-4 text-xs leading-relaxed text-muted-foreground">
         {isInstagramActive
           ? `Instagram Business/Creator account active for ${businessName}. Posters generated in this workspace publish exclusively to this account.`
           : `Connect your Instagram Professional (Business or Creator) account for ${businessName} to enable automated publishing.`}
@@ -3972,7 +4180,7 @@ function Accounts({
 
       {/* Connect Account Modal */}
       <Dialog open={connectModalOpen} onOpenChange={setConnectModalOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md rounded-2xl border-white/10 bg-card/95 backdrop-blur-2xl">
           <DialogHeader>
             <DialogTitle className="font-display text-2xl flex items-center gap-2">
               {selectedPlatform === "Instagram" && <Instagram className="h-5 w-5 text-primary" />}
@@ -3985,11 +4193,11 @@ function Accounts({
           </DialogHeader>
 
           <div className="my-2 space-y-4">
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-left text-xs leading-5 text-amber-950 dark:text-amber-200">
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-left text-xs leading-relaxed text-amber-200">
               <p className="font-semibold flex items-center gap-1.5 text-foreground">
-                <span className="text-amber-600 font-bold">⚠️</span> {selectedPlatform} Account Requirement
+                <span className="text-amber-500 font-bold">⚠️</span> {selectedPlatform} Account Requirement
               </p>
-              <p className="mt-1 text-[11px] text-muted-foreground">
+              <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
                 {selectedPlatform === "Instagram" && (
                   <>Meta Graph API and Zernio require an Instagram <strong>Business</strong> or <strong>Creator</strong> profile. Personal accounts are not supported by Meta's API.</>
                 )}
@@ -4001,12 +4209,12 @@ function Accounts({
 
             <div>
               <p className="mb-2 text-xs font-semibold text-foreground">Automated OAuth Flow via Zernio</p>
-              <p className="mb-3 text-xs text-muted-foreground">
+              <p className="mb-3 text-xs text-muted-foreground leading-relaxed">
                 You will be redirected to {selectedPlatform} to authorize posting for <strong>{businessName}</strong>. The connection will be mapped exclusively to this workspace.
               </p>
               <Button
                 type="button"
-                className="h-12 w-full gap-2 text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
+                className="h-12 w-full gap-2 rounded-xl text-sm font-semibold shadow-md shadow-primary/20"
                 disabled={loading}
                 onClick={handleStartOAuth}
               >
@@ -4022,7 +4230,7 @@ function Accounts({
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConnectModalOpen(false)}>
+            <Button variant="outline" className="rounded-xl" onClick={() => setConnectModalOpen(false)}>
               Close
             </Button>
           </DialogFooter>
@@ -4127,23 +4335,23 @@ function SettingsPage({
         title="Settings"
         description={`Configure details, posting schedule timezone, and caption defaults for ${businessName}.`}
         action={
-          <Button onClick={handleSave} disabled={saving} className="gap-2">
+          <Button onClick={handleSave} disabled={saving} className="h-10 rounded-xl gap-2 font-medium shadow-md shadow-primary/20">
             {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
             Save settings
           </Button>
         }
       />
-      <div className="max-w-2xl divide-y border-y">
-        <section className="py-6">
-          <h2 className="font-display text-2xl">Business details</h2>
+      <div className="max-w-2xl space-y-6">
+        <section className="rounded-2xl border border-white/[0.08] bg-card/60 backdrop-blur-xl p-6 shadow-lg shadow-black/20">
+          <h2 className="font-display text-2xl font-semibold text-foreground">Business details</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <LabeledInput label="Business name" value={business} onChange={setBusiness} />
             <LabeledInput label="Tagline" value={tagline} onChange={setTagline} />
             <div className="sm:col-span-2">
-              <label className="text-xs font-medium">
+              <label className="text-xs font-medium text-foreground">
                 Posting Timezone
                 <select
-                  className="mt-2 flex h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="mt-2 flex h-10 w-full rounded-xl border border-white/[0.08] bg-secondary/40 px-3.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
                   value={timezone}
                   onChange={(event) => setTimezone(event.target.value)}
                 >
@@ -4162,8 +4370,8 @@ function SettingsPage({
           </div>
         </section>
 
-        <section className="py-6">
-          <h2 className="font-display text-2xl">Caption preferences</h2>
+        <section className="rounded-2xl border border-white/[0.08] bg-card/60 backdrop-blur-xl p-6 shadow-lg shadow-black/20">
+          <h2 className="font-display text-2xl font-semibold text-foreground">Caption preferences</h2>
           <p className="mt-1 text-xs text-muted-foreground">
             Pick the tone that sounds most like {businessName}.
           </p>
@@ -4173,7 +4381,9 @@ function SettingsPage({
                 key={item}
                 variant={tone === item ? "secondary" : "outline"}
                 size="sm"
-                className={tone === item ? "border-primary/30 text-primary" : "font-normal"}
+                className={`h-9 rounded-xl text-xs font-medium transition-all ${
+                  tone === item ? "border-primary/40 bg-primary/10 text-primary shadow-xs" : "border-white/[0.08] text-muted-foreground hover:text-foreground"
+                }`}
                 onClick={() => setTone(item)}
                 aria-pressed={tone === item}
               >
@@ -4181,10 +4391,10 @@ function SettingsPage({
               </Button>
             ))}
           </div>
-          <label className="mt-5 block text-xs font-medium">
+          <label className="mt-5 block text-xs font-medium text-foreground">
             Default hashtags
             <Textarea
-              className="mt-2 min-h-20 text-sm font-normal"
+              className="mt-2 min-h-20 text-sm font-normal rounded-xl border-white/[0.08] bg-secondary/40"
               value={hashtags}
               onChange={(event) => setHashtags(event.target.value)}
               placeholder="#Brand, #Community, #Launch"
@@ -4193,39 +4403,38 @@ function SettingsPage({
         </section>
 
         {/* Danger Zone: Delete Business */}
-        <section className="py-6">
-          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-5">
-            <h3 className="font-display text-lg font-semibold text-destructive">Danger Zone</h3>
-            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-              Deleting a workspace will remove all its flyers, drafts, and disconnect any linked Instagram accounts.
+        <section className="rounded-2xl border border-destructive/30 bg-destructive/5 backdrop-blur-xl p-6">
+          <h3 className="font-display text-lg font-semibold text-destructive">Danger Zone</h3>
+          <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+            Deleting a workspace will remove all its flyers, drafts, and disconnect any linked Instagram accounts.
+          </p>
+          {scheduledCount > 0 && (
+            <p className="mt-2 text-xs font-medium text-amber-500">
+              ⚠️ Notice: {scheduledCount} scheduled post(s) currently queued for this workspace.
             </p>
-            {scheduledCount > 0 && (
-              <p className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-400">
-                ⚠️ Notice: {scheduledCount} scheduled post(s) currently queued for this workspace.
+          )}
+          <div className="mt-4">
+            <Button
+              variant="destructive"
+              size="sm"
+              className="h-9 rounded-xl font-medium"
+              onClick={() => setDeleteModalOpen(true)}
+              disabled={!canDelete}
+            >
+              Delete {businessName}
+            </Button>
+            {!canDelete && (
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                You cannot delete your only workspace. Add another business first.
               </p>
             )}
-            <div className="mt-4">
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setDeleteModalOpen(true)}
-                disabled={!canDelete}
-              >
-                Delete {businessName}
-              </Button>
-              {!canDelete && (
-                <p className="mt-1.5 text-[11px] text-muted-foreground">
-                  You cannot delete your only workspace. Add another business first.
-                </p>
-              )}
-            </div>
           </div>
         </section>
       </div>
 
       {/* Delete Confirmation Modal */}
       <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md rounded-2xl border-white/10 bg-card/95 backdrop-blur-2xl">
           <DialogHeader>
             <DialogTitle className="font-display text-2xl text-destructive">
               Delete "{businessName}"?
