@@ -46,7 +46,7 @@ function getEmailTransporter(): Transporter | null {
 async function sendEmail(opts: { to: string; subject: string; html: string; magicUrl?: string }): Promise<void> {
   const transporter = getEmailTransporter();
   const user = process.env["SMTP_USER"];
-  const from = process.env["SMTP_FROM"] || (user ? `PostPilot <${user}>` : "PostPilot <noreply@postpilot.app>");
+  const from = process.env["SMTP_FROM"] || (user ? `dIyA <${user}>` : "dIyA <noreply@diya.app>");
 
   if (!transporter) {
     // Development fallback when SMTP credentials are not configured yet
@@ -94,7 +94,7 @@ export const sendMagicLink = createServerFn({ method: "POST" })
 
       await sendEmail({
         to: email,
-        subject: "Your PostPilot sign-in link",
+        subject: "Your dIyA sign-in link",
         html: buildMagicLinkEmail(magicUrl),
         magicUrl,
       });
@@ -190,19 +190,19 @@ function buildMagicLinkEmail(url: string): string {
       <td align="center">
         <table width="480" cellpadding="0" cellspacing="0" style="background:#fff;border:1px solid #e8e0d5;border-radius:8px;overflow:hidden;">
           <tr>
-            <td style="background:#D9442B;padding:28px 40px;">
-              <p style="margin:0;font-family:Georgia,serif;font-size:22px;color:#fff;font-weight:500;">postpilot</p>
+            <td style="background:#090A0E;padding:28px 40px;text-align:center;">
+              <p style="margin:0;font-family:system-ui,sans-serif;font-size:24px;color:#00E5FF;font-weight:700;letter-spacing:-0.5px;">dIyA <span style="font-size:12px;color:#a855f7;font-weight:400;display:block;">AI DIGITAL MARKETING</span></p>
             </td>
           </tr>
           <tr>
             <td style="padding:40px;">
-              <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#D9442B;">YOUR SIGN-IN LINK</p>
-              <h1 style="margin:0 0 16px;font-family:Georgia,serif;font-size:28px;color:#1C1917;font-weight:500;line-height:1.2;">Good to see you.</h1>
-              <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#78716c;">Click the button below to sign in to your PostPilot workspace. This link expires in 15 minutes and can only be used once.</p>
-              <a href="${url}" style="display:inline-block;background:#D9442B;color:#fff;padding:13px 28px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600;">Sign in to PostPilot →</a>
+              <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#00E5FF;">YOUR SIGN-IN LINK</p>
+              <h1 style="margin:0 0 16px;font-family:system-ui,sans-serif;font-size:26px;color:#1C1917;font-weight:700;line-height:1.2;">Good to see you.</h1>
+              <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#78716c;">Click the button below to sign in to your dIyA workspace. This link expires in 15 minutes and can only be used once.</p>
+              <a href="${url}" style="display:inline-block;background:#00E5FF;color:#090A0E;padding:13px 28px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:700;">Sign in to dIyA →</a>
               <p style="margin:24px 0 0;font-size:12px;color:#a8a29e;">If you didn't request this, you can safely ignore this email. Someone may have entered your email address by mistake.</p>
               <hr style="border:none;border-top:1px solid #e8e0d5;margin:24px 0;">
-              <p style="margin:0;font-size:11px;color:#a8a29e;">PostPilot — Social posts, made simple.</p>
+              <p style="margin:0;font-size:11px;color:#a8a29e;">dIyA — AI Digital Marketing, Made Simple.</p>
             </td>
           </tr>
         </table>

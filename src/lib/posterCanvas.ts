@@ -102,7 +102,7 @@ export async function renderPosterCanvas(opts: RenderPosterOptions): Promise<str
   ctx.textBaseline = "middle";
   ctx.font = '700 26px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   
-  const eyebrowSpaced = (opts.eyebrow || "POSTPILOT").toUpperCase().split("").join(" ");
+  const eyebrowSpaced = (opts.eyebrow || "DIYA").toUpperCase().split("").join(" ");
   ctx.fillText(eyebrowSpaced, width / 2, 140);
 
   // 3. Top ornament line
