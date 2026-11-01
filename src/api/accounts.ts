@@ -202,7 +202,7 @@ export const getZernioConnectUrl = createServerFn({ method: "GET" })
 
       // Default fallback profile if needed
       if (!profileId) {
-        profileId = "6ad323c1906cf34fba1f8939";
+        profileId = "6ae481a73c29e4ac3bd3be76";
       }
 
       // Generate cryptographically signed state carrying businessId & userId
@@ -211,24 +211,30 @@ export const getZernioConnectUrl = createServerFn({ method: "GET" })
         userId: session.userId,
       });
 
-      const redirectUri = `${appUrl}/auth/zernio-callback?state=${encodeURIComponent(signedState)}`;
-
       let zernioPlatform: "facebook" | "instagram" | "twitter" = "instagram";
+      let displayPlatform = "Instagram";
       if (normalizedPlatform === "facebook") {
         zernioPlatform = "facebook";
+        displayPlatform = "Facebook";
       } else if (normalizedPlatform === "x" || normalizedPlatform === "twitter") {
         zernioPlatform = "twitter";
+        displayPlatform = "X";
       } else {
         zernioPlatform = "instagram";
+        displayPlatform = "Instagram";
       }
 
-      // forceReauth=true ensures prompt is presented for this specific business
+      const redirectUri = `${appUrl}/auth/zernio-callback?platform=${encodeURIComponent(displayPlatform)}&state=${encodeURIComponent(signedState)}`;
+
+      console.log(`[getZernioConnectUrl] Requesting ${zernioPlatform} OAuth for profile: ${profileId}`);
+
+      // forceReauth=true ensures prompt is presented so user can select different accounts/pages
       const connectRes = await zernio.connect.getConnectUrl({
         path: { platform: zernioPlatform },
         query: {
           profileId,
           redirect_url: redirectUri,
-          forceReauth: zernioPlatform === "instagram" ? true : undefined,
+          forceReauth: true,
         },
       });
 
@@ -242,7 +248,10 @@ export const getZernioConnectUrl = createServerFn({ method: "GET" })
         businessId: business.id,
         businessName: business.name,
       }, "Connect URL generated successfully");
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.message?.includes("payment method") || err?.status === 402) {
+        return errorToResponse(new ValidationError("Account limit reached. Please add a payment method in your Zernio dashboard to connect more than 2 accounts."));
+      }
       return errorToResponse(err);
     }
   });

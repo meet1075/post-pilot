@@ -100,8 +100,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { name: "author", content: "PostPilot" },
-      { name: "twitter:site", content: "@PostPilot" },
+      { name: "author", content: "dIyA — AI Digital Marketing" },
+      { name: "twitter:site", content: "@dIyA" },
     ],
     links: [
       {
@@ -114,9 +114,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display:ital@0;1&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Work+Sans:wght@400;600;700;800&display=swap",
       },
-      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
-      { rel: "alternate icon", href: "/favicon.ico", type: "image/x-icon" },
-      { rel: "apple-touch-icon", href: "/favicon.png" },
+      { rel: "icon", href: "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo.png", type: "image/png" },
+      { rel: "apple-touch-icon", href: "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo.png" },
     ],
   }),
   shellComponent: RootShell,
@@ -127,11 +126,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <head>
         <HeadContent />
       </head>
-      <body>
+      <body className="min-h-screen bg-background text-foreground antialiased selection:bg-primary/25 selection:text-primary">
         {children}
         <Analytics />
         <SpeedInsights />

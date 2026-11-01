@@ -84,7 +84,7 @@ function ZernioCallbackPage() {
             <LoaderCircle className="mx-auto h-12 w-12 animate-spin text-primary" />
             <h1 className="font-display text-2xl font-semibold">Completing OAuth Connection</h1>
             <p className="text-sm text-muted-foreground">
-              Linking your {connectedPlatform} account with PostPilot...
+              Linking your {connectedPlatform} account with dIyA...
             </p>
           </div>
         )}
@@ -119,7 +119,7 @@ function ZernioCallbackPage() {
               </p>
             </div>
             <Button variant="outline" className="mt-4 w-full" onClick={() => navigate({ to: "/" })}>
-              Back to PostPilot
+              Back to dIyA
             </Button>
           </div>
         )}

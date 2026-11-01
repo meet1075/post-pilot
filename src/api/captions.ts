@@ -341,7 +341,7 @@ function parseJsonCaptions(content: string): CaptionOption[] {
   if (lines.length > 0) {
     return lines.map((line) => ({
       caption: line,
-      hashtags: "#SpecialOffer #PostPilot",
+      hashtags: "#SpecialOffer #dIyA",
     }));
   }
 

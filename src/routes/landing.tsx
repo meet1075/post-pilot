@@ -8,7 +8,7 @@ export const Route = createFileRoute("/landing")({
   component: LandingRoute,
   head: () => ({
     meta: [
-      { title: "PostPilot — AI Social Studio & Instagram Auto-Publisher" },
+      { title: "dIyA — AI Digital Marketing | Social Studio & Auto-Publisher" },
       {
         name: "description",
         content:
