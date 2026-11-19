@@ -465,8 +465,9 @@ function PostPilot() {
         if (Array.isArray(rawPosts)) {
           newPosts = rawPosts.map((p: any) => {
             let dateStr = "";
-            if (p.date) {
-              dateStr = typeof p.date === "string" ? p.date.slice(0, 10) : new Date(p.date).toISOString().slice(0, 10);
+            const rawDate = p.date || p.published_at || p.created_at;
+            if (rawDate) {
+              dateStr = typeof rawDate === "string" ? rawDate.slice(0, 10) : new Date(rawDate).toISOString().slice(0, 10);
             }
             return {
               id: p.id,
@@ -1476,8 +1477,27 @@ function Dashboard({
   onSelectPost?: ((post: SocialPost) => void) | undefined;
 }) {
   const latestPosts = posts.slice(0, 3);
-  const postedCount = posts.filter((post) => post.status === "Posted").length;
+  const totalPostedCount = posts.filter((post) => post.status === "Posted").length;
   const scheduledCount = posts.filter((post) => post.status === "Scheduled").length;
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+
+  const postedThisMonthCount = useMemo(() => {
+    return posts.filter((post) => {
+      if (post.status !== "Posted") return false;
+      if (!post.date) return false;
+      const match = post.date.match(/^(\d{4})-(\d{2})/);
+      if (match) {
+        const postYear = parseInt(match[1], 10);
+        const postMonth = parseInt(match[2], 10) - 1;
+        return postYear === currentYear && postMonth === currentMonth;
+      }
+      const d = new Date(post.date);
+      return !isNaN(d.getTime()) && d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+    }).length;
+  }, [posts, currentYear, currentMonth]);
   const greetingName = userName ? userName.split(" ")[0] : "there";
   const todayLabel = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }).toUpperCase();
 
@@ -1524,13 +1544,17 @@ function Dashboard({
           </div>
           <div className="mt-3 flex items-baseline gap-2">
             <span className="font-display text-4xl font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">
-              {postedCount}
+              {postedThisMonthCount}
             </span>
             <span className="text-xs text-muted-foreground">published</span>
           </div>
           <div className="mt-3 flex items-center gap-2 border-t border-white/[0.06] pt-3 text-xs text-muted-foreground">
             <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            <span>{postedCount > 0 ? `${postedCount} posts live on feeds` : "Ready to publish your first"}</span>
+            <span>
+              {postedThisMonthCount > 0
+                ? `${postedThisMonthCount} ${postedThisMonthCount === 1 ? "post" : "posts"} live on feeds this month`
+                : "Ready to publish your first this month"}
+            </span>
           </div>
         </div>
 
@@ -1769,7 +1793,7 @@ function Dashboard({
         )}
       </section>
       <div className="mt-10 flex flex-wrap items-center gap-5 border-t border-white/[0.08] pt-5 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground/80">{postedCount} posts published</span>
+        <span className="font-medium text-foreground/80">{totalPostedCount} posts published</span>
         <span>•</span>
         <span>{scheduledCount} queued</span>
         <span>•</span>
