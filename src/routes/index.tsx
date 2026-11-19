@@ -465,8 +465,8 @@ function PostPilot() {
 
       // 5. Process Posts
       let newPosts = posts;
-      if (postsRes && "data" in postsRes && postsRes.data) {
-        const rawPosts = postsRes.data.posts;
+      if (postsRes) {
+        const rawPosts = (postsRes as any).data?.posts || (postsRes as any).posts;
         if (Array.isArray(rawPosts)) {
           newPosts = rawPosts.map((p: any) => {
             let dateStr = "";

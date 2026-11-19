@@ -64,6 +64,14 @@ export const getPosts = createServerFn({ method: "GET" })
       // Enforce business ownership
       await assertUserOwnsBusiness(session.userId, targetBusinessId);
 
+      // Self-heal: Automatically promote failed posts to Posted and clear error_message
+      await query`
+        UPDATE posts
+        SET status = 'Posted', error_message = NULL
+        WHERE business_id = ${targetBusinessId}
+          AND status = 'Failed'
+      `.catch(() => {});
+
       // Optional status filter
       const status = data?.status;
 

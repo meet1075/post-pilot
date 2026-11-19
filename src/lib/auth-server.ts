@@ -124,6 +124,7 @@ export function getAuth(envObj?: unknown, request?: Request): any {
         new Set([
           cleanBaseUrl,
           "https://post-pilot-red.vercel.app",
+          "https://post-pilot-git-stag-meetsoni1075s-projects.vercel.app",
           "https://post-pilot.meetsoni1075.workers.dev",
           "http://localhost:8080",
           "http://127.0.0.1:8080",
