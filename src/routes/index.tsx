@@ -387,13 +387,18 @@ function PostPilot() {
         return;
       }
 
-      // Execute all workspace requests in PARALLEL (massive 80% speedup)
-      const [bizRes, bRes, accRes, postsRes] = await Promise.all([
+      // Execute all workspace requests in PARALLEL with resilient error boundary
+      const [bizResResult, bResResult, accResResult, postsResResult] = await Promise.allSettled([
         bizPromise,
         getBusiness({ data: { businessId: targetBizId } }),
         getAccounts({ data: { businessId: targetBizId } }),
         getPosts({ data: { businessId: targetBizId } }),
       ]);
+
+      const bizRes = bizResResult.status === "fulfilled" ? bizResResult.value : null;
+      const bRes = bResResult.status === "fulfilled" ? bResResult.value : null;
+      const accRes = accResResult.status === "fulfilled" ? accResResult.value : null;
+      const postsRes = postsResResult.status === "fulfilled" ? postsResResult.value : null;
 
       // Discard stale in-flight response if user switched workspace during fetch
       if (requestId !== latestRequestRef.current) {
@@ -504,9 +509,8 @@ function PostPilot() {
     }
   };
 
-  // Keep in sync whenever activeUser changes
+  // Revalidate on mount and whenever activeUser changes
   useEffect(() => {
-    if (!activeUser) return;
     refreshWorkspace();
   }, [activeUser?.id, activeUser?.email]);
 
