@@ -31,6 +31,7 @@ import {
 import type { PostRow } from "./posts.js";
 import { log } from "../lib/logger.js";
 import { apiSuccess, formatZodIssues } from "../lib/apiResponse.js";
+import { recordApiLog } from "../lib/auditLogger.js";
 
 interface ConnectedAccountRow {
   id: string;
@@ -45,9 +46,12 @@ interface ConnectedAccountRow {
 export const publishPost = createServerFn({ method: "POST" })
   .validator((d: unknown) => d)
   .handler(async ({ data }) => {
+    const publishStartTime = Date.now();
+    let currentBusinessId: string | undefined = undefined;
     try {
       const session = await requireAuth();
       if (!session.businessId) throw new ForbiddenError("No active business");
+      currentBusinessId = session.businessId;
 
       const ip = getClientIp();
       await checkRateLimit(`business:${session.businessId}`, "publish");
@@ -195,7 +199,15 @@ export const publishPost = createServerFn({ method: "POST" })
       }
 
       const resolvedPlatforms = Array.from(new Set(targetAccounts.map((a) => a.platform)));
-      const platformDisplay = resolvedPlatforms.join(", ") || "Instagram";
+      const normalizePlatformName = (p?: string): "Instagram" | "Facebook" | "X" => {
+        if (!p) return "Instagram";
+        const lower = p.toLowerCase();
+        if (lower === "facebook") return "Facebook";
+        if (lower === "x" || lower === "twitter") return "X";
+        return "Instagram";
+      };
+      const resolvedPrimaryPlatform = normalizePlatformName(targetAccounts[0]?.platform || resolvedPlatforms[0]);
+      const platformDisplay = resolvedPlatforms.join(", ") || resolvedPrimaryPlatform;
 
       // Call Zernio with all target accounts
       const zernioResult = await callZernioPublish({
@@ -220,7 +232,7 @@ export const publishPost = createServerFn({ method: "POST" })
       const [updatedPost] = await query<PostRow>`
         UPDATE posts SET
           status            = ${newStatus},
-          platform          = ${platformDisplay},
+          platform          = ${resolvedPrimaryPlatform},
           date              = ${timing === "now" ? localDate : (scheduled_date ?? null)},
           time              = ${timing === "now" ? localTime : (scheduled_time ?? null)},
           image_url         = COALESCE(${effectiveImageUrl ?? null}, image_url),
@@ -247,15 +259,51 @@ export const publishPost = createServerFn({ method: "POST" })
         )
       `;
 
+      await recordApiLog({
+        businessId: business.id,
+        service: "zernio",
+        endpoint: "/api/publish",
+        method: "POST",
+        status: 200,
+        durationMs: Date.now() - publishStartTime,
+        hasError: false,
+        metadata: {
+          postId: post_id,
+          platforms: resolvedPlatforms,
+          timing,
+          scheduledAt: scheduledAtIso,
+          zernioPostId: zernioResult.postId,
+        },
+      });
+
       return apiSuccess({ post: updatedPost }, timing === "now" ? "Post published successfully" : "Post scheduled successfully");
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const statusCode = (err as any)?.statusCode || ((err as any)?.name === "ValidationError" ? 422 : 500);
+
+      await recordApiLog({
+        businessId: currentBusinessId || (data as any)?.business_id,
+        service: "zernio",
+        endpoint: "/api/publish",
+        method: "POST",
+        status: statusCode,
+        durationMs: Date.now() - publishStartTime,
+        hasError: true,
+        errorMessage: errMsg,
+        metadata: {
+          postId: (data as any)?.post_id,
+          timing: (data as any)?.timing,
+          error: errMsg,
+        },
+      });
+
       // On failure, update post status to Failed
       const d = data as { post_id?: string } | undefined;
       if (d?.post_id) {
         await query`
           UPDATE posts SET
             status = 'Failed',
-            error_message = ${err instanceof Error ? err.message : "Unknown error"}
+            error_message = ${errMsg}
           WHERE id = ${d.post_id}
         `.catch(() => {});
       }
@@ -340,6 +388,7 @@ async function callZernioPublish(opts: {
     scheduledAt: (body["scheduledAt"] as string) || undefined,
   });
 
+  const startTime = Date.now();
   const response = await fetch(`${baseUrl}/posts`, {
     method: "POST",
     headers: {
@@ -350,12 +399,28 @@ async function callZernioPublish(opts: {
     signal: AbortSignal.timeout(20_000),
   });
 
+  let errText: string | null = null;
+  if (!response.ok) {
+    errText = await response.text();
+  }
+
+  await recordApiLog({
+    businessId: opts.post.business_id,
+    service: "zernio",
+    endpoint: `${baseUrl}/posts`,
+    method: "POST",
+    status: response.status,
+    durationMs: Date.now() - startTime,
+    hasError: !response.ok,
+    errorMessage: errText,
+    metadata: { timing: opts.timing, accounts: opts.accounts.length },
+  });
+
   const primaryLogPlatform = opts.accounts[0]?.platform || "Multi";
 
   if (!response.ok) {
-    const text = await response.text();
-    log.publish(primaryLogPlatform, `Zernio Error (${response.status}): ${text.slice(0, 120)}`);
-    throw new ExternalServiceError("Zernio", `${response.status}: ${text}`);
+    log.publish(primaryLogPlatform, `Zernio Error (${response.status}): ${(errText || "").slice(0, 120)}`);
+    throw new ExternalServiceError("Zernio", `${response.status}: ${errText || "Unknown error"}`);
   }
 
   const json = (await response.json()) as {

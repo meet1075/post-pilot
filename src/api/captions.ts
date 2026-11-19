@@ -17,6 +17,7 @@ import { requireAuth, assertUserOwnsBusiness } from "../lib/auth.js";
 import { query, queryOne } from "../lib/db.js";
 import { checkRateLimit, getClientIp } from "../lib/rateLimit.js";
 import { suggestCaptionsSchema } from "../lib/validators.js";
+import { recordApiLog } from "../lib/auditLogger.js";
 import {
   errorToResponse,
   ForbiddenError,
@@ -47,6 +48,7 @@ interface BusinessRow {
 export const suggestCaptions = createServerFn({ method: "POST" })
   .validator((d: unknown) => d)
   .handler(async ({ data }) => {
+    const startTime = Date.now();
     try {
       const session = await requireAuth();
 
@@ -109,8 +111,32 @@ export const suggestCaptions = createServerFn({ method: "POST" })
 
       log.db("Neon", "Stored caption suggestions", { count: suggestions.length, model: modelUsed });
 
+      await recordApiLog({
+        businessId: business.id,
+        service: modelUsed.includes("gpt") ? "openai" : "groq",
+        endpoint: "/api/captions",
+        method: "POST",
+        status: 200,
+        durationMs: Date.now() - startTime,
+        hasError: false,
+        metadata: { model: modelUsed, count: suggestions.length, headline },
+      });
+
       return apiSuccess({ suggestions }, "Captions generated successfully");
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const statusCode = (err as any)?.statusCode || 500;
+      await recordApiLog({
+        businessId: (data as any)?.business_id,
+        service: "groq",
+        endpoint: "/api/captions",
+        method: "POST",
+        status: statusCode,
+        durationMs: Date.now() - startTime,
+        hasError: true,
+        errorMessage: errMsg,
+        metadata: { headline: (data as any)?.headline, error: errMsg },
+      });
       return errorToResponse(err);
     }
   });
@@ -172,6 +198,7 @@ async function callOpenAI(
   userPrompt: string
 ): Promise<CaptionOption[]> {
   const model = process.env["OPENAI_MODEL"] ?? "gpt-4o-mini";
+  const startTime = Date.now();
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -190,9 +217,24 @@ async function callOpenAI(
     signal: AbortSignal.timeout(15_000),
   });
 
+  let errText: string | null = null;
   if (!response.ok) {
-    const text = await response.text();
-    throw new ExternalServiceError("OpenAI", `${response.status}: ${text}`);
+    errText = await response.text();
+  }
+
+  await recordApiLog({
+    service: "openai",
+    endpoint: "https://api.openai.com/v1/chat/completions",
+    method: "POST",
+    status: response.status,
+    durationMs: Date.now() - startTime,
+    hasError: !response.ok,
+    errorMessage: errText,
+    metadata: { model },
+  });
+
+  if (!response.ok) {
+    throw new ExternalServiceError("OpenAI", `${response.status}: ${errText || "Unknown error"}`);
   }
 
   const json = (await response.json()) as {
@@ -209,6 +251,7 @@ async function callGroq(
 ): Promise<CaptionOption[]> {
   const model = process.env["GROQ_MODEL"] ?? "qwen/qwen3.8-27b";
   log.ai("Groq", `Sending request to https://api.groq.com/openai/v1/chat/completions`, { model });
+  const startTime = Date.now();
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -227,10 +270,25 @@ async function callGroq(
     signal: AbortSignal.timeout(15_000),
   });
 
+  let errText: string | null = null;
   if (!response.ok) {
-    const text = await response.text();
-    log.ai("Groq", `HTTP ${response.status} Error: ${text.slice(0, 100)}`);
-    throw new ExternalServiceError("Groq", `${response.status}: ${text}`);
+    errText = await response.text();
+  }
+
+  await recordApiLog({
+    service: "groq",
+    endpoint: "https://api.groq.com/openai/v1/chat/completions",
+    method: "POST",
+    status: response.status,
+    durationMs: Date.now() - startTime,
+    hasError: !response.ok,
+    errorMessage: errText,
+    metadata: { model },
+  });
+
+  if (!response.ok) {
+    log.ai("Groq", `HTTP ${response.status} Error: ${(errText || "").slice(0, 100)}`);
+    throw new ExternalServiceError("Groq", `${response.status}: ${errText || "Unknown error"}`);
   }
 
   const json = (await response.json()) as {

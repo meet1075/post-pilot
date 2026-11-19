@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
+  Activity,
   ArrowDownToLine,
   ArrowLeft,
   ArrowRight,
@@ -45,6 +46,7 @@ import {
   editPosterWithAi,
   publishPost,
   suggestCaptions,
+  logUserActivity,
   type Platform,
   type PosterOption,
   type PostStatus,
@@ -67,6 +69,8 @@ import {
 import { renderPosterCanvas } from "@/lib/posterCanvas";
 import { REGEX, generatePostersSchema } from "@/lib/validators";
 import { LandingPage } from "@/components/LandingPage";
+import { LogsViewerModal } from "@/components/LogsViewerModal";
+import { DiyaLogo } from "@/components/DiyaLogo";
 import {
   SocialPlatformIcon,
   AccountSelectItem,
@@ -287,6 +291,7 @@ function PostPilot() {
 
   // Modal dialog states
   const [addBusinessModalOpen, setAddBusinessModalOpen] = useState(false);
+  const [logsModalOpen, setLogsModalOpen] = useState(false);
   const [connectPromptOpen, setConnectPromptOpen] = useState(false);
   const [connectPromptBiz, setConnectPromptBiz] = useState<{ id: string; name: string } | null>(null);
 
@@ -512,6 +517,16 @@ function PostPilot() {
     const target = businesses.find((b) => b.id === bizId);
     if (!target) return;
 
+    logUserActivity({
+      action: "workspace.switched",
+      businessId: bizId,
+      resourceType: "WORKSPACE",
+      metadata: {
+        toWorkspace: target.name,
+        fromWorkspace: businessName,
+      },
+    });
+
     // 1. INSTANT OPTIMISTIC SWITCH: update ID & active markers immediately
     setActiveBusinessId(bizId);
     saveActiveBusinessId(bizId);
@@ -621,6 +636,23 @@ function PostPilot() {
   const isInstagramConnected = Boolean(instagramAccount);
   const instagramHandle = instagramAccount?.handle || "";
 
+  // Distinct active connected platforms
+  const activeConnectedAccounts = connectedAccounts.filter(
+    (a) => !a.status || a.status === "connected"
+  );
+  const activePlatforms = Array.from(
+    new Set(activeConnectedAccounts.map((a) => normalizePlatform(a.platform)))
+  );
+  const totalConnectedCount = activePlatforms.length;
+  const isAnySocialConnected = totalConnectedCount > 0;
+
+  let socialConnectionLabel = "No social media connected";
+  if (totalConnectedCount >= 2) {
+    socialConnectionLabel = `${totalConnectedCount} social media apps connected`;
+  } else if (totalConnectedCount === 1) {
+    socialConnectionLabel = `${activePlatforms[0]} connected`;
+  }
+
   const userName = activeUser?.name || (isMeetSoni ? "Meet Soni" : "User");
   const userEmail = activeUser?.email || (isMeetSoni ? "meetsoni1075@gmail.com" : "");
   const userAvatar = activeUser?.image;
@@ -631,6 +663,12 @@ function PostPilot() {
     setPage(nextPage);
     setMobileNavOpen(false);
     setBusinessMenuOpen(false);
+    logUserActivity({
+      action: `navigation.view_${nextPage.toLowerCase().replace(/\s+/g, "_")}`,
+      businessId: activeBusinessId,
+      resourceType: "PAGE",
+      metadata: { page: nextPage, businessName },
+    });
   };
 
   // If session is still verifying, show clean splash screen to avoid login screen flash
@@ -638,10 +676,9 @@ function PostPilot() {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
         <div className="flex flex-col items-center gap-3 animate-pulse">
-          <img
-            src={DIYA_LOGO_URL}
-            alt="dIyA AI Digital Marketing"
-            className="h-16 sm:h-20 w-auto object-contain drop-shadow-[0_0_25px_rgba(0,229,255,0.25)]"
+          <DiyaLogo
+            markClassName="h-16 sm:h-20"
+            textClassName="text-xs sm:text-sm tracking-[0.28em]"
           />
         </div>
       </div>
@@ -659,7 +696,7 @@ function PostPilot() {
       <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b border-white/[0.08] bg-background/80 backdrop-blur-xl">
         <div className="flex h-full items-center">
           {/* Logo block: exact width matches sidebar (w-[260px]) with matching border-r on desktop */}
-          <div className="flex h-full items-center gap-3 px-4 sm:px-6 md:w-[260px] md:border-r md:border-white/[0.08] md:px-5">
+          <div className="flex h-full items-center justify-between md:justify-center px-4 sm:px-6 md:w-[260px] md:border-r md:border-white/[0.08] md:px-4">
             <Button
               variant="ghost"
               size="icon"
@@ -670,14 +707,14 @@ function PostPilot() {
               {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </Button>
             <button
-              className="group flex items-center gap-2.5 text-left focus-visible:outline-none"
+              className="group flex items-center justify-center text-center focus-visible:outline-none"
               onClick={() => navigate("Home")}
               aria-label="dIyA home"
             >
-              <img
-                src={DIYA_LOGO_URL}
-                alt="dIyA AI Digital Marketing"
-                className="h-9 sm:h-10 w-auto object-contain transition-transform duration-200 group-hover:scale-105 active:scale-95"
+              <DiyaLogo
+                align="center"
+                markClassName="h-7 sm:h-8"
+                textClassName="text-[9px] sm:text-[10px] tracking-[0.24em]"
               />
             </button>
           </div>
@@ -772,8 +809,8 @@ function PostPilot() {
         {/* Header Right */}
         <div className="relative flex items-center gap-3 px-4 sm:px-7">
           <div className="hidden sm:flex items-center gap-2 rounded-full border border-white/[0.08] bg-secondary/40 px-3 py-1 text-xs text-muted-foreground shadow-xs">
-            <span className={`h-2 w-2 rounded-full ${isInstagramConnected ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-muted-foreground/60"}`} />
-            <span className="font-medium text-[11px]">{isInstagramConnected ? "Instagram connected" : "No social connected"}</span>
+            <span className={`h-2 w-2 rounded-full ${isAnySocialConnected ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-muted-foreground/60"}`} />
+            <span className="font-medium text-[11px]">{socialConnectionLabel}</span>
           </div>
           <span className="hidden text-xs text-muted-foreground/80 lg:inline">Your week, at a glance</span>
           <Button
@@ -929,7 +966,7 @@ function PostPilot() {
                 <nav className="space-y-1" aria-label="Management navigation">
                   {[
                     { name: "Brand kit" as Page, icon: Palette },
-                    { name: "Accounts" as Page, icon: Link2, dot: isInstagramConnected },
+                    { name: "Accounts" as Page, icon: Link2, dot: isAnySocialConnected },
                     { name: "Settings" as Page, icon: Settings2 },
                   ].map(({ name, icon: Icon, dot }) => {
                     const active = page === name;
@@ -956,6 +993,22 @@ function PostPilot() {
                       </button>
                     );
                   })}
+                  <button
+                    onClick={() => {
+                      setLogsModalOpen(true);
+                      logUserActivity({
+                        action: "audit_logs.viewed",
+                        businessId: activeBusinessId,
+                        resourceType: "SYSTEM",
+                        metadata: { section: "Activity & Logs", businessName },
+                      });
+                    }}
+                    className="group relative flex h-10 w-full items-center gap-3 rounded-xl px-3.5 text-sm transition-all duration-150 text-muted-foreground hover:bg-secondary/60 hover:text-foreground font-medium"
+                  >
+                    <Activity className="h-4 w-4 transition-colors text-cyan-400 group-hover:text-cyan-300" />
+                    <span>Activity & Logs</span>
+                    <span className="ml-auto flex h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.8)]" />
+                  </button>
                 </nav>
               </div>
             </div>
@@ -1013,10 +1066,20 @@ function PostPilot() {
                 onOpenAddBusiness={() => setAddBusinessModalOpen(true)}
                 onPublished={(post) => {
                   setPosts((current) => {
-                    const updated = [post, ...current];
+                    const filtered = current.filter((p) => p.id !== post.id);
+                    const updated = [post, ...filtered];
                     try {
                       localStorage.setItem("postpilot_cached_posts", JSON.stringify(updated));
                     } catch {}
+                    if (activeBusinessId) {
+                      const cachedWs = getCachedWorkspace(activeBusinessId);
+                      if (cachedWs) {
+                        saveCachedWorkspace(activeBusinessId, {
+                          ...cachedWs,
+                          posts: updated,
+                        });
+                      }
+                    }
                     return updated;
                   });
                 }}
@@ -1103,6 +1166,12 @@ function PostPilot() {
               businessName={businessName}
               isOpen={Boolean(selectedPostForDetail)}
               onClose={() => setSelectedPostForDetail(null)}
+            />
+            <LogsViewerModal
+              isOpen={logsModalOpen}
+              onClose={() => setLogsModalOpen(false)}
+              businessId={activeBusinessId}
+              businessName={businessName}
             />
 
             {/* Add Business Modal Dialog */}
@@ -2052,8 +2121,12 @@ function CreateFlow({
     }
   }, [selectedAccountIds, connectedAccounts]);
   const [timing, setTiming] = useState<"now" | "schedule">("now");
-  const [scheduledDate, setScheduledDate] = useState("2026-10-18");
-  const [scheduledTime, setScheduledTime] = useState("16:00");
+  const [scheduledDate, setScheduledDate] = useState(() => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+  });
+  const [scheduledTime, setScheduledTime] = useState("12:00");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -2197,8 +2270,8 @@ function CreateFlow({
     }
     setPublishing(true);
     const now = new Date();
-    const todayIso = now.toISOString().slice(0, 10);
-    const timeIso = now.toTimeString().slice(0, 5);
+    const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const timeIso = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     const targetDate = timing === "now" ? todayIso : (scheduledDate || todayIso);
     const targetTime = timing === "now" ? timeIso : (scheduledTime || "12:00");
 
@@ -3377,10 +3450,84 @@ function PublishStep({
             </Button>
           </div>
           {timing === "schedule" && (
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <label className="text-xs font-semibold text-muted-foreground">Day<Input className="mt-1.5 text-foreground rounded-xl" type="date" value={scheduledDate} onChange={(event) => onDate(event.target.value)} /></label>
-              <label className="text-xs font-semibold text-muted-foreground">Time<Input className="mt-1.5 text-foreground rounded-xl" type="time" value={scheduledTime} onChange={(event) => onTime(event.target.value)} /></label>
-              <p className="sm:col-span-2 text-xs text-muted-foreground">Times shown in your local timezone.</p>
+            <div className="mt-4 space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs font-semibold text-muted-foreground flex flex-col gap-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <CalendarDays className="h-3.5 w-3.5 text-primary" />
+                    <span>Select Date</span>
+                  </span>
+                  <Input
+                    className="h-11 text-foreground rounded-xl bg-secondary/50 border-white/10 [color-scheme:dark] cursor-pointer px-3 text-sm focus:border-primary/50 transition-all font-medium"
+                    type="date"
+                    min={(() => {
+                      const d = new Date();
+                      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                    })()}
+                    value={scheduledDate}
+                    onClick={(e) => e.currentTarget.showPicker?.()}
+                    onChange={(event) => onDate(event.target.value)}
+                  />
+                </label>
+                <label className="text-xs font-semibold text-muted-foreground flex flex-col gap-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <Clock3 className="h-3.5 w-3.5 text-primary" />
+                    <span>Select Time</span>
+                  </span>
+                  <Input
+                    className="h-11 text-foreground rounded-xl bg-secondary/50 border-white/10 [color-scheme:dark] cursor-pointer px-3 text-sm focus:border-primary/50 transition-all font-medium"
+                    type="time"
+                    value={scheduledTime}
+                    onClick={(e) => e.currentTarget.showPicker?.()}
+                    onChange={(event) => onTime(event.target.value)}
+                  />
+                </label>
+              </div>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="text-[11px] text-muted-foreground font-medium">Quick Pick:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tmrw = new Date();
+                    tmrw.setDate(tmrw.getDate() + 1);
+                    onDate(`${tmrw.getFullYear()}-${String(tmrw.getMonth() + 1).padStart(2, "0")}-${String(tmrw.getDate()).padStart(2, "0")}`);
+                    onTime("10:00");
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-xs bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border border-white/5 transition-all"
+                >
+                  Tomorrow 10:00 AM
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tmrw = new Date();
+                    tmrw.setDate(tmrw.getDate() + 1);
+                    onDate(`${tmrw.getFullYear()}-${String(tmrw.getMonth() + 1).padStart(2, "0")}-${String(tmrw.getDate()).padStart(2, "0")}`);
+                    onTime("18:00");
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-xs bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border border-white/5 transition-all"
+                >
+                  Tomorrow 6:00 PM
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sat = new Date();
+                    const day = sat.getDay();
+                    const diff = (6 - day + 7) % 7 || 7;
+                    sat.setDate(sat.getDate() + diff);
+                    onDate(`${sat.getFullYear()}-${String(sat.getMonth() + 1).padStart(2, "0")}-${String(sat.getDate()).padStart(2, "0")}`);
+                    onTime("12:00");
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-xs bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border border-white/5 transition-all"
+                >
+                  This Weekend (Sat 12 PM)
+                </button>
+              </div>
+
+              <p className="text-xs text-muted-foreground/80">Times shown in your local timezone.</p>
             </div>
           )}
         </div>
@@ -3415,7 +3562,7 @@ function ScheduledPage({
   onSelectPost?: ((post: SocialPost) => void) | undefined;
 }) {
   const [view, setView] = useState<"list" | "calendar">("list");
-  const [month, setMonth] = useState(new Date(2026, 9, 1));
+  const [month, setMonth] = useState(() => new Date());
   const scheduled = posts.filter((post) => post.status === "Scheduled").sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
   const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
   const firstDay = new Date(month.getFullYear(), month.getMonth(), 1).getDay();

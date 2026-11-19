@@ -27,6 +27,7 @@ import {
 import { uploadPosterImage } from "../lib/storage.js";
 import { log } from "../lib/logger.js";
 import { apiSuccess, formatZodIssues } from "../lib/apiResponse.js";
+import { recordApiLog } from "../lib/auditLogger.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -463,6 +464,7 @@ Render ONLY the quoted text exactly as written, with 100% accurate spelling. Do 
 
   // 2. If no logo or if edits failed, use images/generations endpoint
   if (!rawBuffer) {
+    const startTime = Date.now();
     const genRes = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: {
@@ -479,10 +481,25 @@ Render ONLY the quoted text exactly as written, with 100% accurate spelling. Do 
       signal: AbortSignal.timeout(60_000),
     });
 
+    let errText: string | null = null;
     if (!genRes.ok) {
-      const errText = await genRes.text();
-      log.ai("OpenAI", `HTTP ${genRes.status} Error from images/generations: ${errText.slice(0, 200)}`);
-      throw new ExternalServiceError(`OpenAI image generation failed (${genRes.status}): ${errText.slice(0, 100)}`);
+      errText = await genRes.text();
+    }
+
+    await recordApiLog({
+      service: "openai",
+      endpoint: "https://api.openai.com/v1/images/generations",
+      method: "POST",
+      status: genRes.status,
+      durationMs: Date.now() - startTime,
+      hasError: !genRes.ok,
+      errorMessage: errText,
+      metadata: { model, size, quality },
+    });
+
+    if (!genRes.ok) {
+      log.ai("OpenAI", `HTTP ${genRes.status} Error from images/generations: ${(errText || "").slice(0, 200)}`);
+      throw new ExternalServiceError(`OpenAI image generation failed (${genRes.status}): ${(errText || "").slice(0, 100)}`);
     }
 
     const data = (await genRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
@@ -953,6 +970,7 @@ export const editPosterText = createServerFn({ method: "POST" })
 export const generatePosters = createServerFn({ method: "POST" })
   .validator((d: unknown) => d)
   .handler(async ({ data }) => {
+    const startTime = Date.now();
     try {
       const session = await requireAuth();
 
@@ -1170,8 +1188,39 @@ export const generatePosters = createServerFn({ method: "POST" })
         costUsd,
       });
 
+      await recordApiLog({
+        businessId: business.id,
+        service: "openai",
+        endpoint: "/api/posters/generate",
+        method: "POST",
+        status: 200,
+        durationMs: Date.now() - startTime,
+        hasError: false,
+        metadata: {
+          prompt: prompt.slice(0, 80),
+          format,
+          style,
+          count: options.length,
+          modelUsed,
+          costUsd,
+        },
+      });
+
       return apiSuccess({ options }, "Poster options generated successfully");
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const statusCode = (err as any)?.statusCode || 500;
+      await recordApiLog({
+        businessId: (data as any)?.business_id,
+        service: "openai",
+        endpoint: "/api/posters/generate",
+        method: "POST",
+        status: statusCode,
+        durationMs: Date.now() - startTime,
+        hasError: true,
+        errorMessage: errMsg,
+        metadata: { error: errMsg },
+      });
       return errorToResponse(err);
     }
   }
