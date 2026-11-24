@@ -207,6 +207,27 @@ CREATE INDEX IF NOT EXISTS idx_audit_business ON audit_log (business_id);
 CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_log (resource_type, resource_id);
 
 -- ============================================================
+-- API_LOG (Operational & External Service Telemetry Logs)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS api_log (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id   UUID REFERENCES businesses(id) ON DELETE SET NULL,
+  service       TEXT NOT NULL, -- 'openai' | 'gemini' | 'zernio' | 'ffmpeg' | 'system'
+  endpoint      TEXT NOT NULL,
+  method        TEXT NOT NULL DEFAULT 'POST',
+  status        SMALLINT NOT NULL DEFAULT 200,
+  duration_ms   INT NOT NULL DEFAULT 0,
+  has_error     BOOLEAN NOT NULL DEFAULT false,
+  error_message TEXT,
+  metadata      JSONB DEFAULT '{}'::jsonb,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_log_business_ts ON api_log (business_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_api_log_errors ON api_log (has_error, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_api_log_ts ON api_log (created_at DESC);
+
+-- ============================================================
 -- UPDATED_AT trigger function
 -- ============================================================
 CREATE OR REPLACE FUNCTION update_updated_at()

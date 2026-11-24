@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
+  Activity,
   ArrowDownToLine,
   ArrowLeft,
   ArrowRight,
@@ -12,26 +13,37 @@ import {
   ChevronRight,
   Clock3,
   Copy,
+  Edit3,
   ExternalLink,
   Eye,
+  Hash,
   Instagram,
   Layers,
   LayoutGrid,
+  LayoutTemplate,
+  Image as ImageIcon,
   Link2,
   List,
   LoaderCircle,
   LogOut,
+  Maximize2,
+  MapPin,
   Menu,
+  Monitor,
   MoreHorizontal,
   Palette,
+  PenTool,
   Plus,
+  Search,
   Send,
   Settings2,
   ShieldCheck,
   Sparkles,
   Upload,
+  Video,
   X,
   Zap,
+  ZoomIn,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -45,6 +57,7 @@ import {
   editPosterWithAi,
   publishPost,
   suggestCaptions,
+  logUserActivity,
   type Platform,
   type PosterOption,
   type PostStatus,
@@ -67,10 +80,14 @@ import {
 import { renderPosterCanvas } from "@/lib/posterCanvas";
 import { REGEX, generatePostersSchema } from "@/lib/validators";
 import { LandingPage } from "@/components/LandingPage";
+import { LogsViewerModal } from "@/components/LogsViewerModal";
+import { DiyaLogo } from "@/components/DiyaLogo";
 import {
   SocialPlatformIcon,
   AccountSelectItem,
   PlatformAccountCard,
+  SocialFeedPreview,
+  type SocialFeedPlatform,
   normalizePlatform,
 } from "@/components/social";
 import {
@@ -82,8 +99,12 @@ import {
   saveCachedWorkspace,
 } from "@/lib/workspaceCache";
 import { DIYA_LOGO_URL } from "@/lib/branding";
+import { TemplatesView } from "@/components/TemplatesView";
+import { TEMPLATES, getTemplateById, type TemplateItem } from "@/lib/templates";
+import { getGeoCountries, getGeoStates, getGeoCities, getGeoAreas, generateLocationHashtags } from "@/lib/geoHashtags";
+import { searchLocationsLive, fetchLiveCitiesByState, type GeoLocationItem } from "@/lib/geoApiService";
 
-type Page = "Home" | "Create" | "Scheduled" | "Posted" | "Brand kit" | "Accounts" | "Settings";
+type Page = "Home" | "Create" | "Templates" | "Scheduled" | "Posted" | "Brand kit" | "Accounts" | "Settings";
 
 export const Route = createFileRoute("/")({
   loader: async () => {
@@ -193,6 +214,7 @@ export const Route = createFileRoute("/")({
 const navItems: { name: Page; icon: typeof LayoutGrid }[] = [
   { name: "Home", icon: LayoutGrid },
   { name: "Create", icon: Plus },
+  { name: "Templates", icon: LayoutTemplate },
   { name: "Scheduled", icon: CalendarDays },
   { name: "Posted", icon: Send },
   { name: "Brand kit", icon: Palette },
@@ -206,6 +228,8 @@ export interface BrandKitData {
   tagline: string;
   location: string;
   phone: string;
+  website?: string | undefined;
+  email?: string | undefined;
   colors: string[];
   font: string;
   tone?: string | undefined;
@@ -251,6 +275,7 @@ function PostPilot() {
 
   const [page, setPage] = useState<Page>("Home");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null);
   // Multi-business workspace state with instant cache hydration
   const initialActiveBizId = getActiveBusinessId();
   const initialCachedWs = getCachedWorkspace(initialActiveBizId);
@@ -287,6 +312,7 @@ function PostPilot() {
 
   // Modal dialog states
   const [addBusinessModalOpen, setAddBusinessModalOpen] = useState(false);
+  const [logsModalOpen, setLogsModalOpen] = useState(false);
   const [connectPromptOpen, setConnectPromptOpen] = useState(false);
   const [connectPromptBiz, setConnectPromptBiz] = useState<{ id: string; name: string } | null>(null);
 
@@ -311,20 +337,28 @@ function PostPilot() {
       return {
         businessId: currentBiz.id,
         businessName: currentBiz.name,
-        tagline: "",
-        location: "",
-        phone: "",
-        colors: ["Olive", "Tomato"],
-        font: "Fraunces",
+        tagline: currentBiz.tagline || "",
+        location: (currentBiz as any).location || "Ahmedabad",
+        phone: (currentBiz as any).phone || "6355206575",
+        email: (currentBiz as any).email || "averoinnovations@gmail.com",
+        website: (currentBiz as any).website || "https://averoinnovations.com/",
+        colors: currentBiz.brand_colors && currentBiz.brand_colors.length > 0 ? currentBiz.brand_colors : ["#00A896", "#028090", "#05668D", "#02C39A"],
+        font: (currentBiz as any).font || "Work Sans",
+        logoUrl: currentBiz.logo_url || "https://dihikyljbrbidqgelwac.supabase.co/storage/v1/object/public/post-pilot/logos/7d7831d4-8c66-407b-acbc-a2060d66ff00/1792316942214-avero_logo_transparent.png",
+        logoName: "Brand Mark",
       };
     }
     return {
       businessName: isMeetSoni ? "Avero Innovations" : "My Workspace",
-      tagline: "Ideas into scalable products.",
-      location: "Ahmedabad / Global",
-      phone: "+91 98765 43210",
-      colors: ["Olive", "Tomato"],
-      font: "Fraunces",
+      tagline: "Ideas today. Tomorrow together.",
+      location: "Ahmedabad",
+      phone: "6355206575",
+      email: "averoinnovations@gmail.com",
+      website: "https://averoinnovations.com/",
+      colors: ["#00A896", "#028090", "#05668D", "#02C39A"],
+      font: "Work Sans",
+      logoUrl: "https://dihikyljbrbidqgelwac.supabase.co/storage/v1/object/public/post-pilot/logos/7d7831d4-8c66-407b-acbc-a2060d66ff00/1792316942214-avero_logo_transparent.png",
+      logoName: "Brand Mark",
     };
   });
 
@@ -382,13 +416,18 @@ function PostPilot() {
         return;
       }
 
-      // Execute all workspace requests in PARALLEL (massive 80% speedup)
-      const [bizRes, bRes, accRes, postsRes] = await Promise.all([
+      // Execute all workspace requests in PARALLEL with resilient error boundary
+      const [bizResResult, bResResult, accResResult, postsResResult] = await Promise.allSettled([
         bizPromise,
         getBusiness({ data: { businessId: targetBizId } }),
         getAccounts({ data: { businessId: targetBizId } }),
         getPosts({ data: { businessId: targetBizId } }),
       ]);
+
+      const bizRes = bizResResult.status === "fulfilled" ? bizResResult.value : null;
+      const bRes = bResResult.status === "fulfilled" ? bResResult.value : null;
+      const accRes = accResResult.status === "fulfilled" ? accResResult.value : null;
+      const postsRes = postsResResult.status === "fulfilled" ? postsResResult.value : null;
 
       // Discard stale in-flight response if user switched workspace during fetch
       if (requestId !== latestRequestRef.current) {
@@ -416,10 +455,12 @@ function PostPilot() {
           tagline: b.tagline || "",
           location: b.location || "",
           phone: b.phone || "",
+          website: (b as any).website || "",
+          email: (b as any).email || "",
           colors: Array.isArray(b.brand_colors) && b.brand_colors.length > 0 ? b.brand_colors : ["Tomato", "Olive"],
-          font: "Fraunces",
+          font: (b as any).font || "Work Sans",
           tone: b.tone || "Friendly",
-          timezone: b.timezone || "UTC",
+          timezone: b.timezone || "Asia/Kolkata",
           defaultHashtags: b.default_hashtags || "",
           logoUrl: b.logo_url || undefined,
         };
@@ -455,13 +496,14 @@ function PostPilot() {
 
       // 5. Process Posts
       let newPosts = posts;
-      if (postsRes && "data" in postsRes && postsRes.data) {
-        const rawPosts = postsRes.data.posts;
+      if (postsRes) {
+        const rawPosts = (postsRes as any).data?.posts || (postsRes as any).posts;
         if (Array.isArray(rawPosts)) {
           newPosts = rawPosts.map((p: any) => {
             let dateStr = "";
-            if (p.date) {
-              dateStr = typeof p.date === "string" ? p.date.slice(0, 10) : new Date(p.date).toISOString().slice(0, 10);
+            const rawDate = p.date || p.published_at || p.created_at;
+            if (rawDate) {
+              dateStr = typeof rawDate === "string" ? rawDate.slice(0, 10) : new Date(rawDate).toISOString().slice(0, 10);
             }
             return {
               id: p.id,
@@ -498,9 +540,8 @@ function PostPilot() {
     }
   };
 
-  // Keep in sync whenever activeUser changes
+  // Revalidate on mount and whenever activeUser changes
   useEffect(() => {
-    if (!activeUser) return;
     refreshWorkspace();
   }, [activeUser?.id, activeUser?.email]);
 
@@ -511,6 +552,16 @@ function PostPilot() {
 
     const target = businesses.find((b) => b.id === bizId);
     if (!target) return;
+
+    logUserActivity({
+      action: "workspace.switched",
+      businessId: bizId,
+      resourceType: "WORKSPACE",
+      metadata: {
+        toWorkspace: target.name,
+        fromWorkspace: businessName,
+      },
+    });
 
     // 1. INSTANT OPTIMISTIC SWITCH: update ID & active markers immediately
     setActiveBusinessId(bizId);
@@ -621,6 +672,23 @@ function PostPilot() {
   const isInstagramConnected = Boolean(instagramAccount);
   const instagramHandle = instagramAccount?.handle || "";
 
+  // Distinct active connected platforms
+  const activeConnectedAccounts = connectedAccounts.filter(
+    (a) => !a.status || a.status === "connected"
+  );
+  const activePlatforms = Array.from(
+    new Set(activeConnectedAccounts.map((a) => normalizePlatform(a.platform)))
+  );
+  const totalConnectedCount = activePlatforms.length;
+  const isAnySocialConnected = totalConnectedCount > 0;
+
+  let socialConnectionLabel = "No social media connected";
+  if (totalConnectedCount >= 2) {
+    socialConnectionLabel = `${totalConnectedCount} social media apps connected`;
+  } else if (totalConnectedCount === 1) {
+    socialConnectionLabel = `${activePlatforms[0]} connected`;
+  }
+
   const userName = activeUser?.name || (isMeetSoni ? "Meet Soni" : "User");
   const userEmail = activeUser?.email || (isMeetSoni ? "meetsoni1075@gmail.com" : "");
   const userAvatar = activeUser?.image;
@@ -631,6 +699,12 @@ function PostPilot() {
     setPage(nextPage);
     setMobileNavOpen(false);
     setBusinessMenuOpen(false);
+    logUserActivity({
+      action: `navigation.view_${nextPage.toLowerCase().replace(/\s+/g, "_")}`,
+      businessId: activeBusinessId,
+      resourceType: "PAGE",
+      metadata: { page: nextPage, businessName },
+    });
   };
 
   // If session is still verifying, show clean splash screen to avoid login screen flash
@@ -638,10 +712,9 @@ function PostPilot() {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
         <div className="flex flex-col items-center gap-3 animate-pulse">
-          <img
-            src={DIYA_LOGO_URL}
-            alt="dIyA AI Digital Marketing"
-            className="h-16 sm:h-20 w-auto object-contain drop-shadow-[0_0_25px_rgba(0,229,255,0.25)]"
+          <DiyaLogo
+            markClassName="h-16 sm:h-20"
+            textClassName="text-xs sm:text-sm tracking-[0.28em]"
           />
         </div>
       </div>
@@ -659,7 +732,7 @@ function PostPilot() {
       <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b border-white/[0.08] bg-background/80 backdrop-blur-xl">
         <div className="flex h-full items-center">
           {/* Logo block: exact width matches sidebar (w-[260px]) with matching border-r on desktop */}
-          <div className="flex h-full items-center gap-3 px-4 sm:px-6 md:w-[260px] md:border-r md:border-white/[0.08] md:px-5">
+          <div className="flex h-full items-center justify-between md:justify-center px-4 sm:px-6 md:w-[260px] md:border-r md:border-white/[0.08] md:px-4">
             <Button
               variant="ghost"
               size="icon"
@@ -670,14 +743,14 @@ function PostPilot() {
               {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </Button>
             <button
-              className="group flex items-center gap-2.5 text-left focus-visible:outline-none"
+              className="group flex items-center justify-center text-center focus-visible:outline-none"
               onClick={() => navigate("Home")}
               aria-label="dIyA home"
             >
-              <img
-                src={DIYA_LOGO_URL}
-                alt="dIyA AI Digital Marketing"
-                className="h-9 sm:h-10 w-auto object-contain transition-transform duration-200 group-hover:scale-105 active:scale-95"
+              <DiyaLogo
+                align="center"
+                markClassName="h-7 sm:h-8"
+                textClassName="text-[9px] sm:text-[10px] tracking-[0.24em]"
               />
             </button>
           </div>
@@ -772,8 +845,8 @@ function PostPilot() {
         {/* Header Right */}
         <div className="relative flex items-center gap-3 px-4 sm:px-7">
           <div className="hidden sm:flex items-center gap-2 rounded-full border border-white/[0.08] bg-secondary/40 px-3 py-1 text-xs text-muted-foreground shadow-xs">
-            <span className={`h-2 w-2 rounded-full ${isInstagramConnected ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-muted-foreground/60"}`} />
-            <span className="font-medium text-[11px]">{isInstagramConnected ? "Instagram connected" : "No social connected"}</span>
+            <span className={`h-2 w-2 rounded-full ${isAnySocialConnected ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-muted-foreground/60"}`} />
+            <span className="font-medium text-[11px]">{socialConnectionLabel}</span>
           </div>
           <span className="hidden text-xs text-muted-foreground/80 lg:inline">Your week, at a glance</span>
           <Button
@@ -879,6 +952,7 @@ function PostPilot() {
                 <nav className="space-y-1" aria-label="Workspace navigation">
                   {[
                     { name: "Home" as Page, icon: LayoutGrid },
+                    { name: "Templates" as Page, icon: LayoutTemplate },
                     {
                       name: "Scheduled" as Page,
                       icon: CalendarDays,
@@ -929,7 +1003,7 @@ function PostPilot() {
                 <nav className="space-y-1" aria-label="Management navigation">
                   {[
                     { name: "Brand kit" as Page, icon: Palette },
-                    { name: "Accounts" as Page, icon: Link2, dot: isInstagramConnected },
+                    { name: "Accounts" as Page, icon: Link2, dot: isAnySocialConnected },
                     { name: "Settings" as Page, icon: Settings2 },
                   ].map(({ name, icon: Icon, dot }) => {
                     const active = page === name;
@@ -956,6 +1030,22 @@ function PostPilot() {
                       </button>
                     );
                   })}
+                  <button
+                    onClick={() => {
+                      setLogsModalOpen(true);
+                      logUserActivity({
+                        action: "audit_logs.viewed",
+                        businessId: activeBusinessId,
+                        resourceType: "SYSTEM",
+                        metadata: { section: "Activity & Logs", businessName },
+                      });
+                    }}
+                    className="group relative flex h-10 w-full items-center gap-3 rounded-xl px-3.5 text-sm transition-all duration-150 text-muted-foreground hover:bg-secondary/60 hover:text-foreground font-medium"
+                  >
+                    <Activity className="h-4 w-4 transition-colors text-cyan-400 group-hover:text-cyan-300" />
+                    <span>Activity & Logs</span>
+                    <span className="ml-auto flex h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(6,182,212,0.8)]" />
+                  </button>
                 </nav>
               </div>
             </div>
@@ -1009,19 +1099,48 @@ function PostPilot() {
                 activeBusinessId={activeBusinessId}
                 businesses={businesses}
                 connectedAccounts={connectedAccounts}
+                scheduledCount={posts.filter((p) => p.status === "Scheduled").length}
+                selectedTemplate={selectedTemplate}
+                onClearTemplate={() => setSelectedTemplate(null)}
                 onSwitchBusiness={handleSwitchBusiness}
                 onOpenAddBusiness={() => setAddBusinessModalOpen(true)}
                 onPublished={(post) => {
+                  const safeDate = post.date instanceof Date
+                    ? post.date.toISOString().slice(0, 10)
+                    : (post.date ? String(post.date).slice(0, 10) : "");
+                  const cleanPost = {
+                    ...post,
+                    date: safeDate,
+                  };
                   setPosts((current) => {
-                    const updated = [post, ...current];
+                    const filtered = current.filter((p) => p.id !== cleanPost.id);
+                    const updated = [cleanPost, ...filtered];
                     try {
                       localStorage.setItem("postpilot_cached_posts", JSON.stringify(updated));
                     } catch {}
+                    if (activeBusinessId) {
+                      const cachedWs = getCachedWorkspace(activeBusinessId);
+                      if (cachedWs) {
+                        saveCachedWorkspace(activeBusinessId, {
+                          ...cachedWs,
+                          posts: updated,
+                        });
+                      }
+                    }
                     return updated;
                   });
                 }}
                 onCancel={() => navigate("Home")}
                 onNavigate={navigate}
+              />
+            )}
+            {page === "Templates" && (
+              <TemplatesView
+                businessName={businessName}
+                onSelectTemplate={(tpl) => {
+                  setSelectedTemplate(tpl);
+                  navigate("Create");
+                }}
               />
             )}
             {page === "Scheduled" && (
@@ -1049,6 +1168,26 @@ function PostPilot() {
                     localStorage.setItem("postpilot_brand_kit", JSON.stringify(updated));
                   } catch {}
                   if (activeBusinessId) {
+                    saveCachedWorkspace(activeBusinessId, { brandKit: updated });
+                    setBusinesses((prev) => {
+                      const next = prev.map((b) =>
+                        b.id === activeBusinessId
+                          ? {
+                              ...b,
+                              name: updated.businessName,
+                              tagline: updated.tagline,
+                              location: updated.location,
+                              phone: updated.phone,
+                              website: updated.website,
+                              email: updated.email,
+                              brand_colors: updated.colors,
+                              logo_url: updated.logoUrl,
+                            }
+                          : b
+                      );
+                      saveCachedBusinesses(next as any);
+                      return next;
+                    });
                     try {
                       await updateBusiness({
                         data: {
@@ -1057,11 +1196,27 @@ function PostPilot() {
                           tagline: updated.tagline,
                           location: updated.location,
                           phone: updated.phone,
+                          website: updated.website,
+                          email: updated.email,
                           brand_colors: updated.colors,
                           logo_url: updated.logoUrl || null,
                           tone: (updated.tone as any) || "Friendly",
                           timezone: updated.timezone || "Asia/Kolkata",
                           default_hashtags: updated.defaultHashtags || null,
+                        },
+                      });
+                      await updateBrandKit({
+                        data: {
+                          business_id: activeBusinessId,
+                          colors: updated.colors,
+                          font: updated.font,
+                          caption_tone: updated.tone,
+                          default_hashtags: updated.defaultHashtags,
+                          logo_public_url: updated.logoUrl,
+                          website: updated.website,
+                          email: updated.email,
+                          phone: updated.phone,
+                          location: updated.location,
                         },
                       });
                     } catch (err: any) {
@@ -1103,6 +1258,12 @@ function PostPilot() {
               businessName={businessName}
               isOpen={Boolean(selectedPostForDetail)}
               onClose={() => setSelectedPostForDetail(null)}
+            />
+            <LogsViewerModal
+              isOpen={logsModalOpen}
+              onClose={() => setLogsModalOpen(false)}
+              businessId={activeBusinessId}
+              businessName={businessName}
             />
 
             {/* Add Business Modal Dialog */}
@@ -1407,8 +1568,28 @@ function Dashboard({
   onSelectPost?: ((post: SocialPost) => void) | undefined;
 }) {
   const latestPosts = posts.slice(0, 3);
-  const postedCount = posts.filter((post) => post.status === "Posted").length;
+  const totalPostedCount = posts.filter((post) => post.status === "Posted").length;
   const scheduledCount = posts.filter((post) => post.status === "Scheduled").length;
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+
+  const postedThisMonthCount = useMemo(() => {
+    return posts.filter((post) => {
+      if (post.status !== "Posted") return false;
+      if (!post.date) return false;
+      const dateStr = post.date instanceof Date ? post.date.toISOString().slice(0, 10) : String(post.date);
+      const match = dateStr.match(/^(\d{4})-(\d{2})/);
+      if (match && match[1] && match[2]) {
+        const postYear = parseInt(match[1], 10);
+        const postMonth = parseInt(match[2], 10) - 1;
+        return postYear === currentYear && postMonth === currentMonth;
+      }
+      const d = new Date(dateStr);
+      return !isNaN(d.getTime()) && d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+    }).length;
+  }, [posts, currentYear, currentMonth]);
   const greetingName = userName ? userName.split(" ")[0] : "there";
   const todayLabel = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }).toUpperCase();
 
@@ -1455,13 +1636,17 @@ function Dashboard({
           </div>
           <div className="mt-3 flex items-baseline gap-2">
             <span className="font-display text-4xl font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">
-              {postedCount}
+              {postedThisMonthCount}
             </span>
             <span className="text-xs text-muted-foreground">published</span>
           </div>
           <div className="mt-3 flex items-center gap-2 border-t border-white/[0.06] pt-3 text-xs text-muted-foreground">
             <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            <span>{postedCount > 0 ? `${postedCount} posts live on feeds` : "Ready to publish your first"}</span>
+            <span>
+              {postedThisMonthCount > 0
+                ? `${postedThisMonthCount} ${postedThisMonthCount === 1 ? "post" : "posts"} live on feeds this month`
+                : "Ready to publish your first this month"}
+            </span>
           </div>
         </div>
 
@@ -1700,7 +1885,7 @@ function Dashboard({
         )}
       </section>
       <div className="mt-10 flex flex-wrap items-center gap-5 border-t border-white/[0.08] pt-5 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground/80">{postedCount} posts published</span>
+        <span className="font-medium text-foreground/80">{totalPostedCount} posts published</span>
         <span>•</span>
         <span>{scheduledCount} queued</span>
         <span>•</span>
@@ -1720,10 +1905,11 @@ function Stat({ label, value, note }: { label: string; value: string; note: stri
   );
 }
 
-function formatPostDate(dateStr?: string, timeStr?: string): string {
+function formatPostDate(dateStr?: string | Date, timeStr?: string): string {
   if (!dateStr) return "Recently";
   try {
-    const parts = dateStr.slice(0, 10).split("-").map(Number);
+    const raw = dateStr instanceof Date ? dateStr.toISOString() : String(dateStr);
+    const parts = raw.slice(0, 10).split("-").map(Number);
     const y = parts[0] || 2026;
     const m = (parts[1] || 1) - 1;
     const d = parts[2] || 1;
@@ -1732,9 +1918,9 @@ function formatPostDate(dateStr?: string, timeStr?: string): string {
       day: "numeric",
       year: "numeric",
     });
-    return timeStr ? `${formatted} · ${timeStr.slice(0, 5)}` : formatted;
+    return timeStr ? `${formatted} · ${String(timeStr).slice(0, 5)}` : formatted;
   } catch {
-    return dateStr;
+    return String(dateStr);
   }
 }
 
@@ -1972,12 +2158,21 @@ function PostCard({
   );
 }
 
+const ASPECT_RATIOS = [
+  { ratio: "1:1", label: "1:1", name: "Square", boxW: "w-7", boxH: "h-7", bestFor: "1:1 is best for Instagram and Facebook square posts." },
+  { ratio: "4:5", label: "4:5", name: "Portrait", boxW: "w-6", boxH: "h-8", bestFor: "4:5 is best for Instagram and Facebook portrait posts." },
+  { ratio: "9:16", label: "9:16", name: "Story", boxW: "w-5", boxH: "h-9", bestFor: "9:16 is best for Instagram Stories, Reels, and mobile full-screen." },
+];
+
 function CreateFlow({
   brandKit,
   businessName,
   activeBusinessId,
   businesses = [],
   connectedAccounts = [],
+  scheduledCount = 0,
+  selectedTemplate,
+  onClearTemplate,
   onSwitchBusiness,
   onOpenAddBusiness,
   onPublished,
@@ -1989,6 +2184,9 @@ function CreateFlow({
   activeBusinessId?: string;
   businesses?: BusinessSummaryItem[];
   connectedAccounts?: Array<{ id?: string; platform: string; handle: string; status?: string; externalAccountId?: string }>;
+  scheduledCount?: number;
+  selectedTemplate?: TemplateItem | null;
+  onClearTemplate?: () => void;
   onSwitchBusiness?: (bizId: string) => void;
   onOpenAddBusiness?: () => void;
   onPublished: (post: SocialPost) => void;
@@ -2025,10 +2223,77 @@ function CreateFlow({
 
   const selectedAccountId = selectedAccountIds[0] || "";
 
-  const [prompt, setPrompt] = useState("");
-  const [style, setStyle] = useState("Bold");
-  const [format, setFormat] = useState("Portrait 4:5");
+  const [prompt, setPrompt] = useState(() => selectedTemplate?.defaultPrompt || "");
+  const [style, setStyle] = useState(() => selectedTemplate?.style || "Bold");
+  const [model, setModel] = useState("Google Nano Banana Lite");
+  const [shape, setShape] = useState<string>(() => selectedTemplate?.aspectRatio || "4:5");
+  const format = shape === "1:1" ? "Square" : shape === "9:16" ? "Story" : "Portrait 4:5";
+  const [size, setSize] = useState("1K");
+  const [wordsOnImage, setWordsOnImage] = useState(() => selectedTemplate?.wordsOnImage || "");
+  const [templateId, setTemplateId] = useState<string | null>(() => selectedTemplate?.id || null);
+  const [referenceImageUrl, setReferenceImageUrl] = useState<string>(() => selectedTemplate?.referenceImageUrl || "");
+  const [referenceFileName, setReferenceFileName] = useState<string>("");
+  const [urlInputVal, setUrlInputVal] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [expandedSection, setExpandedSection] = useState<"model" | "reference" | "video" | "shape" | "size" | "words" | "brand" | null>("shape");
+
+  // Keep synced if a new template was selected from Templates page
+  useEffect(() => {
+    if (selectedTemplate) {
+      setTemplateId(selectedTemplate.id);
+      if (selectedTemplate.defaultPrompt) setPrompt(selectedTemplate.defaultPrompt);
+      if (selectedTemplate.style) setStyle(selectedTemplate.style);
+      if (selectedTemplate.aspectRatio) setShape(selectedTemplate.aspectRatio);
+      if (selectedTemplate.wordsOnImage) setWordsOnImage(selectedTemplate.wordsOnImage);
+      if (selectedTemplate.referenceImageUrl) setReferenceImageUrl(selectedTemplate.referenceImageUrl);
+    }
+  }, [selectedTemplate]);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select a valid image file");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Image size exceeds 10MB limit");
+      return;
+    }
+    setReferenceFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      if (result) {
+        setReferenceImageUrl(result);
+        toast.success(`Reference photo "${file.name}" added`);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+  const [tickedBrandDetails, setTickedBrandDetails] = useState({
+    logo: Boolean(brandKit.logoUrl),
+    colors: false,
+    phone: Boolean(brandKit.phone),
+    location: false,
+    website: false,
+    email: Boolean(brandKit.email),
+  });
   const [useBrand, setUseBrand] = useState(true);
+
+  // Synchronize ticked brand details whenever brandKit changes
+  useEffect(() => {
+    setTickedBrandDetails((prev) => ({
+      ...prev,
+      logo: prev.logo || Boolean(brandKit.logoUrl),
+      phone: prev.phone || Boolean(brandKit.phone),
+      email: prev.email || Boolean(brandKit.email),
+      website: prev.website || Boolean(brandKit.website),
+      location: prev.location || Boolean(brandKit.location),
+    }));
+  }, [brandKit.logoUrl, brandKit.phone, brandKit.email, brandKit.website, brandKit.location]);
+
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState<PosterOption[]>(initialOptions);
   const [selected, setSelected] = useState(0);
@@ -2036,6 +2301,7 @@ function CreateFlow({
   const [price, setPrice] = useState("");
   const [dateText, setDateText] = useState("");
   const [caption, setCaption] = useState("");
+  const [postLocation, setPostLocation] = useState(brandKit.location || "");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [suggesting, setSuggesting] = useState(false);
   const [ownCaption, setOwnCaption] = useState(true);
@@ -2052,11 +2318,33 @@ function CreateFlow({
     }
   }, [selectedAccountIds, connectedAccounts]);
   const [timing, setTiming] = useState<"now" | "schedule">("now");
-  const [scheduledDate, setScheduledDate] = useState("2026-10-18");
-  const [scheduledTime, setScheduledTime] = useState("16:00");
+  const [scheduledDate, setScheduledDate] = useState(() => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+  });
+  const [scheduledTime, setScheduledTime] = useState("12:00");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [redirectCountdown, setRedirectCountdown] = useState(3);
+
+  // 3-second automatic redirect to home workspace after successful publish
+  useEffect(() => {
+    if (!success) return;
+    setRedirectCountdown(3);
+    const interval = setInterval(() => {
+      setRedirectCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          onCancel();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [success, onCancel]);
 
   // Mid-flow business switch warning
   const [switchWarnOpen, setSwitchWarnOpen] = useState(false);
@@ -2088,7 +2376,26 @@ function CreateFlow({
 
   const currentOption = options[selected];
   const startGeneration = async () => {
-    const parsed = generatePostersSchema.safeParse({ prompt, style, format });
+    const parsed = generatePostersSchema.safeParse({
+      prompt,
+      style,
+      format,
+      words_on_image: wordsOnImage,
+      size,
+      reference_image_url: referenceImageUrl || null,
+      template_id: templateId || null,
+      ticked_details: tickedBrandDetails,
+      brand_details: {
+        business_name: brandKit.businessName,
+        tagline: brandKit.tagline,
+        phone: brandKit.phone,
+        email: brandKit.email,
+        website: brandKit.website,
+        location: brandKit.location,
+        logo_url: brandKit.logoUrl,
+        colors: brandKit.colors,
+      },
+    });
     if (!parsed.success) {
       toast.error(parsed.error.issues[0]?.message ?? "Please provide a description for your post");
       return;
@@ -2104,7 +2411,12 @@ function CreateFlow({
         2,
         format as any,
         selectedBizId,
-        selectedAccountId
+        selectedAccountId,
+        wordsOnImage,
+        tickedBrandDetails,
+        size,
+        referenceImageUrl || undefined,
+        templateId || undefined
       );
       if (Array.isArray(results) && results.length > 0) {
         setOptions(results);
@@ -2135,7 +2447,12 @@ function CreateFlow({
         2,
         format as any,
         selectedBizId,
-        selectedAccountId
+        selectedAccountId,
+        wordsOnImage,
+        tickedBrandDetails,
+        size,
+        referenceImageUrl || undefined,
+        templateId || undefined
       );
       if (Array.isArray(results) && results.length > 0) {
         setOptions(results);
@@ -2181,6 +2498,10 @@ function CreateFlow({
       return;
     }
     if (timing === "schedule") {
+      if (scheduledCount >= 10) {
+        toast.error("Schedule limit reached: You can have a maximum of 10 active scheduled posts at a time. Please wait for an existing scheduled post to publish or delete one to schedule more.");
+        return;
+      }
       if (!scheduledDate || !REGEX.date.test(scheduledDate)) {
         toast.error("Please enter a valid scheduled date (YYYY-MM-DD)");
         return;
@@ -2197,8 +2518,8 @@ function CreateFlow({
     }
     setPublishing(true);
     const now = new Date();
-    const todayIso = now.toISOString().slice(0, 10);
-    const timeIso = now.toTimeString().slice(0, 5);
+    const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const timeIso = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     const targetDate = timing === "now" ? todayIso : (scheduledDate || todayIso);
     const targetTime = timing === "now" ? timeIso : (scheduledTime || "12:00");
 
@@ -2213,6 +2534,13 @@ function CreateFlow({
           footer: currentOption?.footer ?? brandKit.tagline ?? "IDEAS INTO SCALABLE PRODUCTS",
           logoUrl: brandKit.logoUrl,
           font: brandKit.font,
+          format,
+          contactInfo: {
+            phone: tickedBrandDetails.phone ? brandKit.phone : undefined,
+            email: tickedBrandDetails.email ? brandKit.email : undefined,
+            website: tickedBrandDetails.website ? brandKit.website : undefined,
+            location: tickedBrandDetails.location ? brandKit.location : undefined,
+          },
         });
         const uploadRes = await uploadPosterDataUrl({ data: { dataUrl } });
         if (uploadRes?.success && uploadRes.publicUrl) {
@@ -2238,6 +2566,7 @@ function CreateFlow({
       socialAccountIds: selectedAccountIds.length > 0 ? selectedAccountIds : undefined,
       headline,
       caption,
+      location: postLocation || undefined,
       date: targetDate,
       time: targetTime,
       status: timing === "now" ? "Posted" : "Scheduled",
@@ -2255,7 +2584,45 @@ function CreateFlow({
 
   const steps = ["Describe", "Choose a poster", "Caption & publish"];
   if (success) {
-    return <div className="mx-auto max-w-xl py-16 text-center sm:py-24"><span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-olive/10 text-olive"><Check className="h-7 w-7" /></span><p className="mt-6 text-[11px] font-semibold uppercase text-primary">ALL SET</p><h1 className="mt-2 font-display text-4xl">{timing === "now" ? "Your post is out there." : "It's in the calendar."}</h1><p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">{timing === "now" ? "Your post is marked as shared. Your next good idea can start whenever you're ready." : `Your post is lined up for ${new Date(`${scheduledDate}T${scheduledTime}`).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}.`}</p><div className="mt-7 flex flex-wrap justify-center gap-3"><Button variant="outline" onClick={() => onNavigate(timing === "now" ? "Posted" : "Scheduled")}>{timing === "now" ? "View posted history" : "Open your calendar"}<ArrowRight className="h-4 w-4" /></Button><Button onClick={onCancel}>Back to home</Button></div></div>;
+    return (
+      <div className="mx-auto max-w-xl py-16 text-center sm:py-24 animate-in fade-in duration-300">
+        <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+          <Check className="h-8 w-8 stroke-[3]" />
+        </span>
+        <p className="mt-6 text-[11px] font-bold uppercase tracking-widest text-primary">POST COMPLETED</p>
+        <h1 className="mt-2 font-display text-4xl font-semibold text-foreground">
+          {timing === "now" ? "Your post is out there!" : "It's in the calendar!"}
+        </h1>
+        <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">
+          {timing === "now"
+            ? "Your post has been published across your connected channels."
+            : `Your post is lined up for ${new Date(`${scheduledDate}T${scheduledTime}`).toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}.`}
+        </p>
+
+        {/* 3-Second Automatic Countdown Card */}
+        <div className="mt-6 mx-auto max-w-xs rounded-xl border border-white/10 bg-secondary/50 p-3.5 shadow-sm">
+          <p className="text-xs font-medium text-foreground flex items-center justify-center gap-1.5">
+            <Clock3 className="h-3.5 w-3.5 text-primary" />
+            Moving to home workspace in <strong className="text-primary font-bold text-sm">{redirectCountdown}s</strong>...
+          </p>
+          <div className="mt-2.5 h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
+            <div
+              className="h-full bg-primary transition-all duration-1000 ease-linear rounded-full"
+              style={{ width: `${(redirectCountdown / 3) * 100}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="mt-7 flex flex-wrap justify-center gap-3">
+          <Button onClick={onCancel} className="font-semibold shadow-md">
+            Go to workspace now <ArrowRight className="h-4 w-4 ml-1.5" />
+          </Button>
+          <Button variant="outline" onClick={() => onNavigate(timing === "now" ? "Posted" : "Scheduled")}>
+            {timing === "now" ? "View posted history" : "Open your calendar"}
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   const activeInstagram = connectedAccounts.find((a) => a.platform.toLowerCase() === "instagram");
@@ -2273,18 +2640,22 @@ function CreateFlow({
       </div>
       <div className="mb-8 grid grid-cols-3 rounded-2xl border border-white/[0.08] bg-card/60 p-1.5 backdrop-blur-sm" aria-label="Post creation steps">
         {steps.map((label, index) => {
-          const isCurrent = step === index + 1;
-          const isPassed = step > index + 1;
+          const stepNumber = index + 1;
+          const isCurrent = step === stepNumber;
+          const isPassed = step > stepNumber;
+          // Once user has generated posters and is in Step 2 or 3, prevent clicking back to Step 1 (Describe)
+          const isClickable = step === 1 ? isCurrent : (stepNumber > 1 && stepNumber <= step);
           return (
             <button
               key={label}
-              onClick={() => index + 1 <= step && setStep(index + 1)}
+              disabled={!isClickable}
+              onClick={() => isClickable && setStep(stepNumber as 1 | 2 | 3)}
               className={`flex items-center justify-center gap-2.5 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all ${
                 isCurrent
                   ? "bg-primary text-white shadow-md shadow-primary/25"
-                  : isPassed
+                  : isClickable
                   ? "text-primary hover:bg-primary/10"
-                  : "text-muted-foreground cursor-not-allowed opacity-60"
+                  : "text-muted-foreground cursor-not-allowed opacity-50"
               }`}
               aria-current={isCurrent ? "step" : undefined}
             >
@@ -2448,22 +2819,496 @@ function CreateFlow({
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
           />
-          <div className="mt-5 grid gap-5 border-t border-white/[0.08] pt-5 sm:grid-cols-2">
-            <ChoiceRow label="Style" choices={["Bold", "Minimal", "Festive", "Elegant"]} value={style} onChange={setStyle} />
-            <ChoiceRow label="Format" choices={["Square", "Portrait 4:5", "Story"]} value={format} onChange={setFormat} />
-          </div>
-          <div className="mt-5 flex items-center justify-between border-t border-white/[0.08] pt-5">
+          {/* Expandable Generation Options (Reference UI) */}
+          <div className="mt-6 rounded-2xl border border-white/[0.08] bg-card/60 divide-y divide-white/[0.06] overflow-hidden backdrop-blur-md shadow-lg">
+            {/* ROW 1: REFERENCE PHOTOS */}
             <div>
-              <p className="text-sm font-semibold text-foreground">Use my brand colors and logo</p>
-              <p className="mt-1 text-xs text-muted-foreground">Keep each post feeling like {businessName}.</p>
+              <button
+                type="button"
+                onClick={() => setExpandedSection(expandedSection === "reference" ? null : "reference")}
+                className="w-full flex items-center justify-between p-4 sm:p-4.5 hover:bg-white/[0.02] transition-colors text-left"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pink-500/10 text-pink-400 border border-pink-500/20 shadow-xs">
+                    <ImageIcon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-foreground">Reference photos</span>
+                    <p className="text-[11px] text-muted-foreground">Upload style reference to guide AI composition & lighting</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {referenceImageUrl ? "1 photo added" : "None"}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${expandedSection === "reference" ? "rotate-180" : ""}`} />
+                </div>
+              </button>
+              {expandedSection === "reference" && (
+                <div className="px-4 pb-5 pt-1 border-t border-white/[0.04] bg-white/[0.01] space-y-3.5">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+
+                  {referenceImageUrl ? (
+                    <div className="flex flex-col sm:flex-row items-center gap-4 rounded-xl border border-white/[0.08] bg-card/60 p-3">
+                      <div className="relative h-28 w-24 rounded-lg overflow-hidden border border-white/10 shrink-0 bg-black/40">
+                        <img
+                          src={referenceImageUrl}
+                          alt="Reference"
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                      <div className="flex-1 space-y-1.5 text-center sm:text-left">
+                        <div className="flex items-center justify-center sm:justify-start gap-1.5 text-xs font-semibold text-foreground">
+                          <Check className="h-4 w-4 text-emerald-400" />
+                          <span>Active Reference Image</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground truncate max-w-xs">
+                          {referenceFileName || "Selected reference layout/photo"}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground/80">
+                          The AI will emulate the visual hierarchy, lighting, and layout of this image.
+                        </p>
+                        <div className="flex items-center justify-center sm:justify-start gap-2 pt-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs border-white/[0.1] gap-1"
+                            onClick={() => fileInputRef.current?.click()}
+                          >
+                            <Upload className="h-3 w-3" /> Change photo
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 gap-1"
+                            onClick={() => {
+                              setReferenceImageUrl("");
+                              setReferenceFileName("");
+                            }}
+                          >
+                            <X className="h-3 w-3" /> Remove
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {/* Dropzone */}
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        className="cursor-pointer flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-white/[0.15] hover:border-primary/50 bg-secondary/30 hover:bg-secondary/50 p-6 text-center transition-all group"
+                      >
+                        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-2 group-hover:scale-110 transition-transform">
+                          <Upload className="h-5 w-5" />
+                        </div>
+                        <span className="text-xs font-semibold text-foreground">
+                          Click to upload reference photo
+                        </span>
+                        <span className="text-[11px] text-muted-foreground mt-0.5">
+                          PNG, JPG, WebP up to 10MB
+                        </span>
+                      </div>
+
+                      {/* URL input option */}
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Or paste reference image URL (https://...)"
+                          value={urlInputVal}
+                          onChange={(e) => setUrlInputVal(e.target.value)}
+                          className="h-9 text-xs bg-secondary/40 border-white/[0.08]"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-9 text-xs border-white/[0.1] shrink-0"
+                          onClick={() => {
+                            if (urlInputVal.trim().startsWith("http")) {
+                              setReferenceImageUrl(urlInputVal.trim());
+                              setReferenceFileName("External URL");
+                              setUrlInputVal("");
+                              toast.success("Reference photo URL applied");
+                            } else {
+                              toast.error("Please enter a valid HTTP/HTTPS image URL");
+                            }
+                          }}
+                        >
+                          Apply URL
+                        </Button>
+                      </div>
+
+                      {/* Presets */}
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1.5">
+                          Or try sample reference styles:
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[
+                            { name: "SaaS Tech Mockup", url: "/showcase/tech_software_showcase.jpg" },
+                            { name: "Artisanal Café", url: "/showcase/cafe_offer_showcase.jpg" },
+                            { name: "Cricket Championship", url: "/showcase/cricket_direction_1.jpg" },
+                            { name: "Festive Red Retail", url: "/showcase/pizza_offer_showcase.jpg" },
+                          ].map((preset) => (
+                            <button
+                              key={preset.name}
+                              type="button"
+                              onClick={() => {
+                                setReferenceImageUrl(preset.url);
+                                setReferenceFileName(preset.name);
+                                toast.success(`Applied reference style: ${preset.name}`);
+                              }}
+                              className="rounded-lg border border-white/[0.08] bg-card/60 px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-primary/10 hover:border-primary/30 hover:text-primary transition-colors flex items-center gap-1"
+                            >
+                              <Sparkles className="h-2.5 w-2.5" />
+                              {preset.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] text-muted-foreground/80 leading-relaxed">
+                        The reference photo guides the AI on composition balance, lighting mood, color palette, and layout aesthetic.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            <Switch checked={useBrand} onCheckedChange={setUseBrand} aria-label="Use my brand colors and logo" />
+
+            {/* ROW: SHAPE & SIZE (3 Core Sizes: 1:1, 4:5, 9:16) */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setExpandedSection(expandedSection === "shape" ? null : "shape")}
+                className="w-full flex items-center justify-between p-4 sm:p-4.5 hover:bg-white/[0.02] transition-colors text-left"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400 border border-orange-500/20 shadow-xs">
+                    <LayoutGrid className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-foreground">Shape</span>
+                    <p className="text-[11px] text-muted-foreground">Select canvas aspect ratio (1:1, 4:5, 9:16)</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {shape} · {ASPECT_RATIOS.find((r) => r.ratio === shape)?.name || "Portrait"}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${expandedSection === "shape" ? "rotate-180" : ""}`} />
+                </div>
+              </button>
+              {expandedSection === "shape" && (
+                <div className="px-4 pb-5 pt-1 border-t border-white/[0.04] bg-white/[0.01]">
+                  <div className="grid grid-cols-3 gap-3">
+                    {ASPECT_RATIOS.map((item) => {
+                      const isSelected = shape === item.ratio;
+                      return (
+                        <button
+                          key={item.ratio}
+                          type="button"
+                          onClick={() => setShape(item.ratio)}
+                          className={`flex flex-col items-center justify-between p-3 rounded-2xl border transition-all text-center ${
+                            isSelected
+                              ? "border-[#FF5722] bg-[#FF5722]/10 ring-1 ring-[#FF5722]/40 text-[#FF5722] shadow-sm"
+                              : "border-white/[0.08] bg-card/40 text-muted-foreground hover:border-white/20 hover:text-foreground hover:bg-card"
+                          }`}
+                        >
+                          <div className="flex h-12 w-full items-center justify-center mb-1.5">
+                            <div
+                              className={`${item.boxW} ${item.boxH} rounded-[3px] border-2 transition-all ${
+                                isSelected
+                                  ? "border-[#FF5722] bg-[#FF5722]/20"
+                                  : "border-muted-foreground/35 bg-muted/20"
+                              }`}
+                            />
+                          </div>
+                          <span className={`text-xs font-bold ${isSelected ? "text-[#FF5722]" : "text-foreground/90"}`}>
+                            {item.label} · {item.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-3.5 text-xs text-muted-foreground/90">
+                    {ASPECT_RATIOS.find((r) => r.ratio === shape)?.bestFor || "Recommended canvas aspect ratio."}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* ROW 2: SIZE */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setExpandedSection(expandedSection === "size" ? null : "size")}
+                className="w-full flex items-center justify-between p-4 sm:p-4.5 hover:bg-white/[0.02] transition-colors text-left"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20 shadow-xs">
+                    <Monitor className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-foreground">Size</span>
+                    <p className="text-[11px] text-muted-foreground">Output resolution and dimensions</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">{size || "1K"}</span>
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${expandedSection === "size" ? "rotate-180" : ""}`} />
+                </div>
+              </button>
+              {expandedSection === "size" && (
+                <div className="px-4 pb-5 pt-1 border-t border-white/[0.04] bg-white/[0.01] space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {["1K", "2K", "Standard (1024x1280)", "HD (1080x1350)"].map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setSize(s)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          size === s
+                            ? "border-primary bg-primary text-white shadow-xs"
+                            : "border-white/[0.08] bg-card text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
+                      Custom size / resolution text option
+                    </label>
+                    <Input
+                      value={size}
+                      onChange={(e) => setSize(e.target.value)}
+                      placeholder="e.g. 1K or 1024x1280"
+                      className="h-9 text-xs bg-secondary/40 border-white/[0.08]"
+                    />
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Standard 1K generates crisp web-ready images; 2K provides ultra-high resolution printing detail.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ROW 3: WORDS ON THE IMAGE */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setExpandedSection(expandedSection === "words" ? null : "words")}
+                className="w-full flex items-center justify-between p-4 sm:p-4.5 hover:bg-white/[0.02] transition-colors text-left"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 shadow-xs">
+                    <PenTool className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-foreground">Words on the image</span>
+                    <p className="text-[11px] text-muted-foreground">Custom headline and text to print</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {wordsOnImage.trim() ? "Custom text" : "None"}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${expandedSection === "words" ? "rotate-180" : ""}`} />
+                </div>
+              </button>
+              {expandedSection === "words" && (
+                <div className="px-4 pb-5 pt-1 border-t border-white/[0.04] bg-white/[0.01] space-y-2">
+                  <Textarea
+                    value={wordsOnImage}
+                    onChange={(e) => setWordsOnImage(e.target.value)}
+                    placeholder="The words to print, exactly as you want them&#10;e.g. Avero.innovations is now Aurelian International&#10;Continuing our commitment to software innovation.&#10;⚡ Discover our software solutions."
+                    className="min-h-[100px] text-sm resize-y rounded-xl border-white/[0.08] bg-secondary/50 placeholder:text-muted-foreground/50"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Printed exactly as you type, one line per line. Leave it empty and AI adds one short line.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* ROW 4: BRAND KIT */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setExpandedSection(expandedSection === "brand" ? null : "brand")}
+                className="w-full flex items-center justify-between p-4 sm:p-4.5 hover:bg-white/[0.02] transition-colors text-left"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 shadow-xs">
+                    <Palette className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-foreground">Brand kit</span>
+                    <p className="text-[11px] text-muted-foreground">Choose which brand details to include</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">{useBrand ? "On" : "Off"}</span>
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${expandedSection === "brand" ? "rotate-180" : ""}`} />
+                </div>
+              </button>
+              {expandedSection === "brand" && (
+                <div className="px-4 pb-5 pt-1 border-t border-white/[0.04] bg-white/[0.01] space-y-4">
+                  <div className="flex items-center justify-between py-1">
+                    <div>
+                      <span className="text-xs font-semibold text-foreground block">Enable Brand Kit details</span>
+                      <span className="text-[11px] text-muted-foreground">Automatically inject selected business items</span>
+                    </div>
+                    <Switch checked={useBrand} onCheckedChange={setUseBrand} />
+                  </div>
+
+                  {useBrand && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      {/* Logo */}
+                      <label className="flex items-start gap-3 p-3 rounded-xl border border-white/[0.06] bg-card/40 hover:bg-card/70 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={tickedBrandDetails.logo}
+                          onChange={(e) => setTickedBrandDetails((p) => ({ ...p, logo: e.target.checked }))}
+                          className="mt-0.5 rounded border-white/20 text-primary focus:ring-primary/25 h-4 w-4 accent-primary"
+                        />
+                        <div className="min-w-0">
+                          <span className="text-xs font-semibold text-foreground block">Logo</span>
+                          {brandKit.logoUrl ? (
+                            <div className="mt-1 flex items-center gap-2">
+                              <img src={brandKit.logoUrl} alt="Logo" className="h-6 w-6 rounded-md object-contain bg-white p-0.5" />
+                              <span className="text-[11px] text-muted-foreground truncate">{brandKit.logoName || "Brand Mark"}</span>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-muted-foreground">Not in your brand kit</span>
+                          )}
+                        </div>
+                      </label>
+
+                      {/* Colours */}
+                      <label className="flex items-start gap-3 p-3 rounded-xl border border-white/[0.06] bg-card/40 hover:bg-card/70 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={tickedBrandDetails.colors}
+                          onChange={(e) => setTickedBrandDetails((p) => ({ ...p, colors: e.target.checked }))}
+                          className="mt-0.5 rounded border-white/20 text-primary focus:ring-primary/25 h-4 w-4 accent-primary"
+                        />
+                        <div className="min-w-0">
+                          <span className="text-xs font-semibold text-foreground block">Colours</span>
+                          {brandKit.colors && brandKit.colors.length > 0 ? (
+                            <div className="mt-1 flex items-center gap-1.5">
+                              {brandKit.colors.slice(0, 3).map((c) => (
+                                <span key={c} className="h-3.5 w-3.5 rounded-full border border-white/20" style={{ backgroundColor: c.toLowerCase() === "tomato" ? "#B91C1C" : c.toLowerCase() === "olive" ? "#365314" : c.toLowerCase() === "mustard" ? "#78350F" : "#028090" }} />
+                              ))}
+                              <span className="text-[11px] text-muted-foreground ml-1">{brandKit.colors.join(", ")}</span>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-muted-foreground">Not in your brand kit</span>
+                          )}
+                        </div>
+                      </label>
+
+                      {/* Phone */}
+                      <label className="flex items-start gap-3 p-3 rounded-xl border border-white/[0.06] bg-card/40 hover:bg-card/70 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={tickedBrandDetails.phone}
+                          onChange={(e) => setTickedBrandDetails((p) => ({ ...p, phone: e.target.checked }))}
+                          className="mt-0.5 rounded border-white/20 text-primary focus:ring-primary/25 h-4 w-4 accent-primary"
+                        />
+                        <div className="min-w-0">
+                          <span className="text-xs font-semibold text-foreground block">Phone</span>
+                          <span className="text-[11px] text-muted-foreground truncate block">
+                            {brandKit.phone || "Not in your brand kit"}
+                          </span>
+                        </div>
+                      </label>
+
+                      {/* Location */}
+                      <label className="flex items-start gap-3 p-3 rounded-xl border border-white/[0.06] bg-card/40 hover:bg-card/70 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={tickedBrandDetails.location}
+                          onChange={(e) => setTickedBrandDetails((p) => ({ ...p, location: e.target.checked }))}
+                          className="mt-0.5 rounded border-white/20 text-primary focus:ring-primary/25 h-4 w-4 accent-primary"
+                        />
+                        <div className="min-w-0">
+                          <span className="text-xs font-semibold text-foreground block">Location</span>
+                          <span className="text-[11px] text-muted-foreground truncate block">
+                            {brandKit.location || "Not in your brand kit"}
+                          </span>
+                        </div>
+                      </label>
+
+                      {/* Website */}
+                      <label className="flex items-start gap-3 p-3 rounded-xl border border-white/[0.06] bg-card/40 hover:bg-card/70 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={tickedBrandDetails.website}
+                          onChange={(e) => setTickedBrandDetails((p) => ({ ...p, website: e.target.checked }))}
+                          className="mt-0.5 rounded border-white/20 text-primary focus:ring-primary/25 h-4 w-4 accent-primary"
+                        />
+                        <div className="min-w-0">
+                          <span className="text-xs font-semibold text-foreground block">Website</span>
+                          <span className="text-[11px] text-muted-foreground truncate block">
+                            {brandKit.website || "Not in your brand kit"}
+                          </span>
+                        </div>
+                      </label>
+
+                      {/* Email */}
+                      <label className="flex items-start gap-3 p-3 rounded-xl border border-white/[0.06] bg-card/40 hover:bg-card/70 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={tickedBrandDetails.email}
+                          onChange={(e) => setTickedBrandDetails((p) => ({ ...p, email: e.target.checked }))}
+                          className="mt-0.5 rounded border-white/20 text-primary focus:ring-primary/25 h-4 w-4 accent-primary"
+                        />
+                        <div className="min-w-0">
+                          <span className="text-xs font-semibold text-foreground block">Email</span>
+                          <span className="text-[11px] text-muted-foreground truncate block">
+                            {brandKit.email || "Not in your brand kit"}
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t border-white/[0.04]">
+                    <span>Ticked details are added to the image.</span>
+                    <button
+                      type="button"
+                      onClick={() => onNavigate("Brand kit")}
+                      className="text-primary font-semibold hover:underline"
+                    >
+                      Edit brand kit
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/[0.08] pt-5">
-            <p className="text-xs text-muted-foreground">You can edit every detail next.</p>
-            <Button className="h-11 px-6 rounded-xl font-semibold gap-2 shadow-lg shadow-primary/25 hover:shadow-primary/40" onClick={startGeneration}>
-              Generate poster <ArrowRight className="h-4 w-4 stroke-[2.5]" />
+
+          <div className="mt-7 flex flex-col items-center justify-center gap-2 border-t border-white/[0.08] pt-5">
+            <Button
+              className="h-12 w-full max-w-md rounded-2xl font-bold gap-2.5 shadow-xl shadow-primary/25 hover:shadow-primary/40 bg-gradient-to-r from-primary to-primary/85 text-white text-sm"
+              onClick={startGeneration}
+            >
+              <Sparkles className="h-4 w-4" />
+              Generate
+              <span className="ml-1 rounded-lg bg-black/30 px-2 py-0.5 text-xs font-semibold text-white/90">
+                3 credits
+              </span>
             </Button>
+            <span className="text-xs text-muted-foreground">
+              Charged only if it works • about 30 seconds
+            </span>
           </div>
         </section>
       )}
@@ -2511,6 +3356,9 @@ function CreateFlow({
         headline={headline}
         price={price}
         caption={caption}
+        location={postLocation}
+        brandKitLocation={brandKit.location}
+        onLocationChange={setPostLocation}
         suggestions={suggestions}
         suggesting={suggesting}
         ownCaption={ownCaption}
@@ -2518,7 +3366,9 @@ function CreateFlow({
         timing={timing}
         scheduledDate={scheduledDate}
         scheduledTime={scheduledTime}
+        scheduledCount={scheduledCount}
         onCaption={setCaption}
+        onToggleOwnCaption={setOwnCaption}
         onSuggest={loadSuggestions}
         onChooseSuggestion={(text) => setCaption(text)}
         onPlatforms={setPlatforms}
@@ -2669,6 +3519,9 @@ function PosterStep({
   const [aiEditOpen, setAiEditOpen] = useState(false);
   const [aiEditInstruction, setAiEditInstruction] = useState("");
   const [aiEditing, setAiEditing] = useState(false);
+  const [enlargeImage, setEnlargeImage] = useState<{ url: string; title: string; format?: string } | null>(null);
+  const [lightboxTab, setLightboxTab] = useState<"poster" | "instagram" | "facebook">("poster");
+  const [feedPreviewMode, setFeedPreviewMode] = useState<"poster" | "instagram" | "facebook">("poster");
   const [renderTick, setRenderTick] = useState(0);
   const aiEditInputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -2802,6 +3655,7 @@ function PosterStep({
         instruction: aiEditInstruction.trim(),
         optionId: currentOpt.id,
         currentBrief: currentOpt.brief,
+        format: (currentOpt.format || format) as any,
       });
 
       const nextOptions = [...options];
@@ -2844,19 +3698,38 @@ function PosterStep({
                 aria-pressed={selected === index}
                 aria-label={`Select poster ${index + 1}`}
               >
-                <Poster
-                  theme={item.theme}
-                  eyebrow={item.eyebrow}
-                  headline={item.headline}
-                  price={item.price}
-                  dateText={item.date_text || item.brief?.date_text}
-                  footer={item.footer}
-                  selected={selected === index}
-                  logoUrl={logoUrl}
-                  font={font}
-                  format={item.format || format}
-                  imageUrl={item.imageUrl}
-                />
+                <div className="relative">
+                  <Poster
+                    theme={item.theme}
+                    eyebrow={item.eyebrow}
+                    headline={item.headline}
+                    price={item.price}
+                    dateText={item.date_text || item.brief?.date_text}
+                    footer={item.footer}
+                    selected={selected === index}
+                    logoUrl={logoUrl}
+                    font={font}
+                    format={item.format || format}
+                    imageUrl={item.imageUrl}
+                  />
+                  {item.imageUrl && (
+                    <button
+                      type="button"
+                      className="absolute bottom-2 right-2 z-30 h-7 w-7 rounded-lg bg-black/80 hover:bg-black text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md border border-white/20"
+                      title="Click to view full size"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEnlargeImage({
+                          url: item.imageUrl!,
+                          title: item.headline || `Direction ${index + 1}`,
+                          format: item.format || format,
+                        });
+                      }}
+                    >
+                      <ZoomIn className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
                 <div className="mt-2.5 flex items-center justify-between">
                   <span className="block text-[11px] text-muted-foreground font-semibold">Direction {index + 1}</span>
                   {selected === index && (
@@ -2865,6 +3738,16 @@ function PosterStep({
                     </span>
                   )}
                 </div>
+                {item.prize_text && (
+                  <div className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-amber-400">
+                    <span>{item.prize_text}</span>
+                  </div>
+                )}
+                {item.time_text && (
+                  <div className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <span>⏰ {item.time_text}</span>
+                  </div>
+                )}
               </button>
             ))}
           </div>
@@ -2887,31 +3770,142 @@ function PosterStep({
         </div>
 
         <div className="lg:sticky lg:top-24 lg:self-start">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">YOUR PICK</p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-[11px] gap-1 rounded-lg text-primary border-primary/30 hover:bg-primary/10 font-semibold"
-              onClick={focusAiEdit}
-            >
-              <Sparkles className="h-3 w-3" /> Edit with AI
-            </Button>
+            <div className="flex items-center gap-1.5">
+              {option.imageUrl && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-[11px] gap-1 rounded-lg text-primary border-primary/30 hover:bg-primary/10 font-semibold"
+                    onClick={() => {
+                      setLightboxTab("instagram");
+                      setEnlargeImage({
+                        url: option.imageUrl!,
+                        title: headline || option.headline || "Your Pick",
+                        format: option.format || format,
+                      });
+                    }}
+                  >
+                    <Eye className="h-3.5 w-3.5 text-pink-400" />
+                    <span>Feed Preview</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-[11px] gap-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 font-medium"
+                    onClick={() => {
+                      setLightboxTab("poster");
+                      setEnlargeImage({
+                        url: option.imageUrl!,
+                        title: headline || option.headline || "Your Pick",
+                        format: option.format || format,
+                      });
+                    }}
+                  >
+                    <ZoomIn className="h-3.5 w-3.5" /> Enlarge
+                  </Button>
+                </>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] gap-1 rounded-lg text-primary border-primary/30 hover:bg-primary/10 font-semibold"
+                onClick={focusAiEdit}
+              >
+                <Sparkles className="h-3 w-3" /> Edit with AI
+              </Button>
+            </div>
           </div>
 
-          <div className="mx-auto max-w-[280px] rounded-2xl border border-white/[0.08] bg-card/75 p-3.5 shadow-2xl backdrop-blur-xl relative">
-            <Poster
-              theme={option.theme}
-              eyebrow={option.eyebrow}
-              headline={headline}
-              price={price}
-              dateText={dateText}
-              footer={option.footer}
-              logoUrl={logoUrl}
-              font={font}
-              format={option.format || format}
-              imageUrl={option.imageUrl}
-            />
+          {/* Quick Preview Toggle (Poster | Instagram | Facebook) */}
+          {option.imageUrl && (
+            <div className="mb-3 flex items-center justify-center gap-1 rounded-xl border border-white/[0.08] bg-card/60 p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setFeedPreviewMode("poster")}
+                className={`flex-1 rounded-lg py-1 px-2 text-[11px] font-semibold transition-all ${
+                  feedPreviewMode === "poster"
+                    ? "bg-secondary text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Poster
+              </button>
+              <button
+                type="button"
+                onClick={() => setFeedPreviewMode("instagram")}
+                className={`flex-1 rounded-lg py-1 px-2 text-[11px] font-semibold flex items-center justify-center gap-1 transition-all ${
+                  feedPreviewMode === "instagram"
+                    ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Instagram className="h-3 w-3" /> Instagram
+              </button>
+              <button
+                type="button"
+                onClick={() => setFeedPreviewMode("facebook")}
+                className={`flex-1 rounded-lg py-1 px-2 text-[11px] font-semibold flex items-center justify-center gap-1 transition-all ${
+                  feedPreviewMode === "facebook"
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span className="font-bold text-[10px]">f</span> Facebook
+              </button>
+            </div>
+          )}
+
+          <div
+            className={`mx-auto max-w-[320px] rounded-2xl border border-white/[0.08] bg-card/75 p-3.5 shadow-2xl backdrop-blur-xl relative group ${
+              option.imageUrl ? "cursor-zoom-in" : ""
+            }`}
+            onClick={() => {
+              if (option.imageUrl) {
+                setLightboxTab(feedPreviewMode);
+                setEnlargeImage({
+                  url: option.imageUrl,
+                  title: headline || option.headline || "Your Pick",
+                  format: option.format || format,
+                });
+              }
+            }}
+          >
+            {feedPreviewMode === "poster" ? (
+              <Poster
+                theme={option.theme}
+                eyebrow={option.eyebrow}
+                headline={headline}
+                price={price}
+                dateText={dateText}
+                footer={option.footer}
+                logoUrl={logoUrl}
+                font={font}
+                format={option.format || format}
+                imageUrl={option.imageUrl}
+              />
+            ) : (
+              <SocialFeedPreview
+                platform={feedPreviewMode === "instagram" ? "Instagram" : "Facebook"}
+                imageUrl={option.imageUrl || ""}
+                businessName={businessName}
+                headline={headline}
+                caption={option.footer}
+                logoUrl={logoUrl}
+                format={option.format || format}
+                showPlatformToggle={false}
+              />
+            )}
+
+            {option.imageUrl && (
+              <div className="absolute top-5 right-5 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="flex items-center gap-1 rounded-lg bg-black/85 px-2.5 py-1 text-[10px] font-semibold text-white shadow-xl border border-white/20 backdrop-blur-xs">
+                  <ZoomIn className="h-3 w-3 text-primary" /> Click to enlarge
+                </span>
+              </div>
+            )}
 
             {aiEditing && (
               <div className="absolute inset-0 bg-background/90 backdrop-blur-xs flex flex-col items-center justify-center p-4 rounded-2xl text-center gap-2 z-10 border border-primary/40">
@@ -2995,8 +3989,15 @@ function PosterStep({
           </div>
 
           <div className="mt-4 flex gap-3">
-            <Button variant="outline" className="flex-1 h-11 rounded-xl font-medium" onClick={onBack}>
-              Back
+            <Button
+              variant="outline"
+              className="flex-1 h-11 rounded-xl font-medium gap-1.5 border-white/[0.1] hover:bg-white/[0.05]"
+              onClick={onRegenerate}
+              disabled={loading}
+              title="Generate new poster variations"
+            >
+              <Sparkles className="h-4 w-4 text-primary" />
+              Try new ideas
             </Button>
             <Button className="flex-1 gap-2 h-11 rounded-xl font-semibold shadow-lg shadow-primary/25 hover:shadow-primary/40" onClick={onContinue}>
               Continue <ArrowRight className="h-4 w-4 stroke-[2.5]" />
@@ -3120,6 +4121,107 @@ function PosterStep({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Full-Screen Image Lightbox Modal with Feed Preview Option */}
+      <Dialog open={Boolean(enlargeImage)} onOpenChange={(open) => !open && setEnlargeImage(null)}>
+        <DialogContent className="sm:max-w-3xl p-3 sm:p-5 bg-card/95 backdrop-blur-2xl border-white/10 rounded-3xl overflow-hidden shadow-2xl">
+          <DialogHeader className="flex flex-row items-center justify-between pb-3 border-b border-white/5">
+            <div>
+              <DialogTitle className="font-display text-lg text-foreground truncate max-w-lg">
+                {enlargeImage?.title || "Poster Preview"}
+              </DialogTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {lightboxTab === "poster"
+                  ? `Full-resolution view · ${enlargeImage?.format || "High Definition"}`
+                  : lightboxTab === "instagram"
+                  ? "Live Instagram Feed Mockup Preview"
+                  : "Live Facebook Feed Mockup Preview"}
+              </p>
+            </div>
+            {/* View Selector Tabs */}
+            <div className="flex items-center gap-1 rounded-xl border border-white/[0.08] bg-black/40 p-1">
+              <button
+                type="button"
+                onClick={() => setLightboxTab("poster")}
+                className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${
+                  lightboxTab === "poster"
+                    ? "bg-secondary text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Poster
+              </button>
+              <button
+                type="button"
+                onClick={() => setLightboxTab("instagram")}
+                className={`rounded-lg px-2.5 py-1 text-xs font-semibold flex items-center gap-1 transition-all ${
+                  lightboxTab === "instagram"
+                    ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Instagram className="h-3 w-3" /> Instagram
+              </button>
+              <button
+                type="button"
+                onClick={() => setLightboxTab("facebook")}
+                className={`rounded-lg px-2.5 py-1 text-xs font-semibold flex items-center gap-1 transition-all ${
+                  lightboxTab === "facebook"
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span className="font-bold text-[10px]">f</span> Facebook
+              </button>
+            </div>
+          </DialogHeader>
+
+          <div className="relative flex items-center justify-center rounded-2xl overflow-y-auto bg-black/50 border border-white/5 max-h-[75vh] p-4 mt-2">
+            {enlargeImage?.url && (
+              lightboxTab === "poster" ? (
+                <img
+                  src={enlargeImage.url}
+                  alt={enlargeImage.title || "Full size poster"}
+                  className="max-h-[70vh] w-auto max-w-full object-contain rounded-xl shadow-2xl"
+                />
+              ) : (
+                <SocialFeedPreview
+                  platform={lightboxTab === "instagram" ? "Instagram" : "Facebook"}
+                  imageUrl={enlargeImage.url}
+                  businessName={businessName}
+                  headline={enlargeImage.title}
+                  caption={option.footer}
+                  logoUrl={logoUrl}
+                  format={option.format || format}
+                  showPlatformToggle={false}
+                />
+              )
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-3 pt-3 border-t border-white/5 mt-1">
+            <span className="text-[11px] text-muted-foreground">
+              Click anywhere outside or press Esc to close
+            </span>
+            {enlargeImage?.url && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs gap-1.5 rounded-xl border-white/10 hover:bg-secondary/60"
+                onClick={() => {
+                  const a = document.createElement("a");
+                  a.href = enlargeImage.url;
+                  a.target = "_blank";
+                  a.rel = "noopener noreferrer";
+                  a.download = "poster-full-size.png";
+                  a.click();
+                }}
+              >
+                <ArrowDownToLine className="h-3.5 w-3.5" /> Download original
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -3136,6 +4238,9 @@ function PublishStep({
   headline,
   price,
   caption,
+  location: postLocation = "",
+  brandKitLocation = "",
+  onLocationChange,
   suggestions,
   suggesting,
   ownCaption,
@@ -3143,7 +4248,9 @@ function PublishStep({
   timing,
   scheduledDate,
   scheduledTime,
+  scheduledCount = 0,
   onCaption,
+  onToggleOwnCaption,
   onSuggest,
   onChooseSuggestion,
   onPlatforms,
@@ -3164,6 +4271,9 @@ function PublishStep({
   headline: string;
   price: string;
   caption: string;
+  location?: string | undefined;
+  brandKitLocation?: string | undefined;
+  onLocationChange?: ((value: string) => void) | undefined;
   suggestions: string[];
   suggesting: boolean;
   ownCaption: boolean;
@@ -3171,7 +4281,9 @@ function PublishStep({
   timing: "now" | "schedule";
   scheduledDate: string;
   scheduledTime: string;
+  scheduledCount?: number;
   onCaption: (value: string) => void;
+  onToggleOwnCaption?: (value: boolean) => void;
   onSuggest: () => void;
   onChooseSuggestion: (value: string) => void;
   onPlatforms: (value: Platform[]) => void;
@@ -3184,39 +4296,324 @@ function PublishStep({
   const togglePlatform = (platform: Platform) => onPlatforms(platforms.includes(platform) ? platforms.filter((item) => item !== platform) : [...platforms, platform]);
   const initial = (businessName || "P").charAt(0).toUpperCase();
   const displayHandle = instagramAccount?.handle ? `@${instagramAccount.handle}` : businessName.toLowerCase().replace(/\s+/g, ".");
+  const [previewZoomOpen, setPreviewZoomOpen] = useState(false);
+  const [publishPreviewMode, setPublishPreviewMode] = useState<"poster" | "instagram" | "facebook">("instagram");
+  const [zoomLightboxTab, setZoomLightboxTab] = useState<"poster" | "instagram" | "facebook">("instagram");
+
+  const quickHashtags = useMemo(() => {
+    const bizClean = businessName.replace(/[^a-zA-Z0-9]/g, "");
+    const tags = [
+      bizClean ? `#${bizClean}` : "#BrandStory",
+      "#TrendingNow",
+      "#SpecialOffer",
+      "#NewDrop",
+      "#Exclusive",
+      "#SocialMedia",
+    ];
+    return tags;
+  }, [businessName]);
+
+  const insertHashtag = (tag: string) => {
+    const formatted = tag.startsWith("#") ? tag : `#${tag}`;
+    if (!caption.includes(formatted)) {
+      onCaption(caption ? `${caption.trim()} ${formatted}` : formatted);
+    }
+  };
+
+  // Dynamic Geo Hashtag & Location Engine
+  const geoCountries = useMemo(() => getGeoCountries(), []);
+
+  const [geoCountry, setGeoCountry] = useState(() => {
+    const locLower = (postLocation || brandKitLocation || "").toLowerCase();
+    if (locLower.includes("us") || locLower.includes("york") || locLower.includes("america") || locLower.includes("california")) return "usa";
+    if (locLower.includes("uk") || locLower.includes("london") || locLower.includes("england")) return "uk";
+    if (locLower.includes("dubai") || locLower.includes("uae") || locLower.includes("abu dhabi")) return "uae";
+    if (locLower.includes("canada") || locLower.includes("toronto")) return "canada";
+    if (locLower.includes("australia") || locLower.includes("sydney")) return "australia";
+    return "india";
+  });
+
+  const availableStates = useMemo(() => getGeoStates(geoCountry), [geoCountry]);
+  const [geoState, setGeoState] = useState<string>("all");
+  const [citySearchFilter, setCitySearchFilter] = useState<string>("");
+
+  // Live Cities via CountriesNow third-party API
+  const [liveCities, setLiveCities] = useState<GeoCity[] | null>(null);
+  const [loadingLiveCities, setLoadingLiveCities] = useState<boolean>(false);
+
+  // Live Global Geocoding & Autocomplete via OpenStreetMap Nominatim & Zippopotam
+  const [liveLocationSearchResults, setLiveLocationSearchResults] = useState<GeoLocationItem[]>([]);
+  const [isSearchingLive, setIsSearchingLive] = useState<boolean>(false);
+
+  // Fetch live cities from CountriesNow when a specific state is chosen
+  useEffect(() => {
+    if (geoState === "all") {
+      setLiveCities(null);
+      return;
+    }
+    const currentCountryObj = geoCountries.find((c) => c.id === geoCountry);
+    const countryName = currentCountryObj?.name || geoCountry;
+    const currentStateObj = availableStates.find((s) => s.code === geoState || s.id === geoState);
+    const stateName = currentStateObj?.name || geoState;
+
+    let active = true;
+    setLoadingLiveCities(true);
+    fetchLiveCitiesByState(countryName, stateName)
+      .then((cities) => {
+        if (active && cities && cities.length > 0) {
+          setLiveCities(cities);
+        }
+      })
+      .catch(() => {
+        // Handled silently by fallback
+      })
+      .finally(() => {
+        if (active) setLoadingLiveCities(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [geoCountry, geoState, geoCountries, availableStates]);
+
+  // Live location search debounce effect (OpenStreetMap Nominatim & Zippopotam)
+  useEffect(() => {
+    const query = citySearchFilter.trim();
+    if (query.length < 2) {
+      setLiveLocationSearchResults([]);
+      setIsSearchingLive(false);
+      return;
+    }
+
+    const currentCountryObj = geoCountries.find((c) => c.id === geoCountry);
+    const timer = setTimeout(() => {
+      setIsSearchingLive(true);
+      searchLocationsLive(query, { countryCode: currentCountryObj?.code })
+        .then((items) => {
+          setLiveLocationSearchResults(items);
+        })
+        .catch(() => {
+          setLiveLocationSearchResults([]);
+        })
+        .finally(() => {
+          setIsSearchingLive(false);
+        });
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [citySearchFilter, geoCountry, geoCountries]);
+
+  const availableCities = useMemo(() => {
+    let cities = liveCities || getGeoCities(geoCountry, geoState === "all" ? undefined : geoState);
+    if (citySearchFilter.trim()) {
+      const q = citySearchFilter.trim().toLowerCase();
+      cities = cities.filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          (c.stateOrRegion && c.stateOrRegion.toLowerCase().includes(q)) ||
+          (c.stateCode && c.stateCode.toLowerCase().includes(q)) ||
+          c.areas.some((a) => a.name.toLowerCase().includes(q) || a.postalCode.includes(q))
+      );
+    }
+    return cities;
+  }, [geoCountry, geoState, citySearchFilter, liveCities]);
+
+  const [geoCity, setGeoCity] = useState(() => {
+    const locLower = (postLocation || brandKitLocation || "").toLowerCase();
+    if (locLower.includes("mumbai")) return "mumbai";
+    if (locLower.includes("bangalore") || locLower.includes("bengaluru")) return "bengaluru";
+    if (locLower.includes("delhi")) return "delhi";
+    if (locLower.includes("pune")) return "pune";
+    if (locLower.includes("hyderabad")) return "hyderabad";
+    if (locLower.includes("york") || locLower.includes("nyc")) return "new-york";
+    if (locLower.includes("los angeles") || locLower.includes("la")) return "los-angeles";
+    if (locLower.includes("francisco") || locLower.includes("sf")) return "san-francisco";
+    return availableCities[0]?.id || "ahmedabad";
+  });
+
+  // Keep city valid when country changes
+  useEffect(() => {
+    if (availableCities.length > 0 && !availableCities.some((c) => c.id === geoCity)) {
+      setGeoCity(availableCities[0]?.id || "");
+    }
+  }, [availableCities, geoCity]);
+
+  const availableAreas = useMemo(() => getGeoAreas(geoCountry, geoCity), [geoCountry, geoCity]);
+  const [geoArea, setGeoArea] = useState("");
+
+  const selectedAreaObj = useMemo(() => {
+    return availableAreas.find((a) => a.id === geoArea);
+  }, [availableAreas, geoArea]);
+
+  const selectedCityObj = useMemo(() => {
+    return availableCities.find((c) => c.id === geoCity);
+  }, [availableCities, geoCity]);
+
+  const suggestedGeoHashtags = useMemo(() => {
+    return generateLocationHashtags({
+      countryId: geoCountry,
+      stateCode: geoState !== "all" ? geoState : undefined,
+      cityId: geoCity,
+      areaId: geoArea || undefined,
+      customLocation: postLocation,
+    });
+  }, [geoCountry, geoState, geoCity, geoArea, postLocation]);
+
+  const [selectedGeoTags, setSelectedGeoTags] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (suggestedGeoHashtags.length > 0) {
+      setSelectedGeoTags(suggestedGeoHashtags.slice(0, 6));
+    } else {
+      setSelectedGeoTags([]);
+    }
+  }, [suggestedGeoHashtags]);
+
+  const isAllGeoSelected = selectedGeoTags.length > 0 && selectedGeoTags.length === suggestedGeoHashtags.length;
+
+  const handleToggleSelectAllHashtags = () => {
+    if (isAllGeoSelected) {
+      setSelectedGeoTags([]);
+    } else {
+      setSelectedGeoTags([...suggestedGeoHashtags]);
+    }
+  };
+
+  const handleToggleGeoTag = (tag: string) => {
+    setSelectedGeoTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  };
+
+  const handleAddSelectedToCaption = () => {
+    if (selectedGeoTags.length === 0) return;
+    let nextCaption = caption ? caption.trim() : "";
+    for (const tag of selectedGeoTags) {
+      if (!nextCaption.toLowerCase().includes(tag.toLowerCase())) {
+        nextCaption = nextCaption ? `${nextCaption} ${tag}` : tag;
+      }
+    }
+    onCaption(nextCaption);
+  };
 
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(250px,0.85fr)_minmax(380px,1.15fr)]">
       <section className="lg:sticky lg:top-24 lg:self-start">
-        <p className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">A LITTLE PREVIEW</p>
-        <div className="mx-auto max-w-[320px] rounded-2xl border border-white/[0.08] bg-card/85 p-4 shadow-2xl backdrop-blur-xl">
-          <div className="mb-3.5 flex items-center gap-2.5">
-            {logoUrl ? (
-              <div className="h-7 w-7 rounded-full overflow-hidden border border-white/10 bg-white p-0.5 shrink-0 flex items-center justify-center shadow-xs">
-                <img src={logoUrl} alt="Logo" className="h-full w-full object-contain" />
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">LIVE FEED PREVIEW</p>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-[11px] gap-1 rounded-lg text-primary hover:bg-primary/10 font-semibold"
+            onClick={() => setPreviewZoomOpen(true)}
+          >
+            <Maximize2 className="h-3 w-3" /> Full size
+          </Button>
+        </div>
+
+        {/* View Mode Toggle */}
+        <div className="mb-3.5 flex items-center justify-center gap-1 rounded-xl border border-white/[0.08] bg-card/60 p-1 text-xs">
+          <button
+            type="button"
+            onClick={() => setPublishPreviewMode("instagram")}
+            className={`flex-1 rounded-lg py-1 px-2 text-[11px] font-semibold flex items-center justify-center gap-1 transition-all ${
+              publishPreviewMode === "instagram"
+                ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Instagram className="h-3 w-3" /> Instagram
+          </button>
+          <button
+            type="button"
+            onClick={() => setPublishPreviewMode("facebook")}
+            className={`flex-1 rounded-lg py-1 px-2 text-[11px] font-semibold flex items-center justify-center gap-1 transition-all ${
+              publishPreviewMode === "facebook"
+                ? "bg-blue-600 text-white shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span className="font-bold text-[10px]">f</span> Facebook
+          </button>
+          <button
+            type="button"
+            onClick={() => setPublishPreviewMode("poster")}
+            className={`flex-1 rounded-lg py-1 px-2 text-[11px] font-semibold transition-all ${
+              publishPreviewMode === "poster"
+                ? "bg-secondary text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Poster
+          </button>
+        </div>
+
+        <div className="mx-auto max-w-[340px]">
+          {publishPreviewMode === "poster" ? (
+            <div className="rounded-2xl border border-white/[0.08] bg-card/85 p-4 shadow-2xl backdrop-blur-xl">
+              <div className="mb-3.5 flex items-center gap-2.5">
+                {logoUrl ? (
+                  <div className="h-7 w-7 rounded-full overflow-hidden border border-white/10 bg-white p-0.5 shrink-0 flex items-center justify-center shadow-xs">
+                    <img src={logoUrl} alt="Logo" className="h-full w-full object-contain" />
+                  </div>
+                ) : (
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
+                    {initial}
+                  </span>
+                )}
+                <span className="text-xs font-semibold text-foreground truncate">{displayHandle}</span>
+                <MoreHorizontal className="ml-auto h-4 w-4 text-muted-foreground" />
               </div>
-            ) : (
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
-                {initial}
-              </span>
-            )}
-            <span className="text-xs font-semibold text-foreground truncate">{displayHandle}</span>
-            <MoreHorizontal className="ml-auto h-4 w-4 text-muted-foreground" />
-          </div>
-          <Poster
-            theme={option?.theme ?? "tomato"}
-            eyebrow={option?.eyebrow ?? businessName.toUpperCase()}
-            headline={headline}
-            price={price}
-            footer={option?.footer ?? "IDEAS INTO SCALABLE PRODUCTS"}
-            logoUrl={logoUrl}
-            font={font}
-            imageUrl={option?.imageUrl}
-          />
-          <p className="mt-3.5 line-clamp-3 text-xs leading-5 text-foreground/90">
-            <span className="font-semibold text-foreground">{displayHandle} </span>
-            {caption || "Your caption will show up here."}
-          </p>
+
+              <div
+                className={`relative rounded-xl overflow-hidden border border-white/10 ${
+                  option?.imageUrl ? "cursor-zoom-in group" : ""
+                }`}
+                onClick={() => {
+                  if (option?.imageUrl) setPreviewZoomOpen(true);
+                }}
+              >
+                <Poster
+                  theme={option?.theme ?? "tomato"}
+                  eyebrow={option?.eyebrow ?? businessName.toUpperCase()}
+                  headline={headline}
+                  price={price}
+                  footer={option?.footer ?? "IDEAS INTO SCALABLE PRODUCTS"}
+                  logoUrl={logoUrl}
+                  font={font}
+                  imageUrl={option?.imageUrl}
+                />
+              </div>
+
+              <p className="mt-3.5 line-clamp-3 text-xs leading-5 text-foreground/90">
+                <span className="font-semibold text-foreground">{displayHandle} </span>
+                {caption || "Your caption will show up here."}
+              </p>
+            </div>
+          ) : (
+            <div
+              className="cursor-pointer"
+              onClick={() => {
+                if (option?.imageUrl) {
+                  setZoomLightboxTab(publishPreviewMode);
+                  setPreviewZoomOpen(true);
+                }
+              }}
+            >
+              <SocialFeedPreview
+                platform={publishPreviewMode === "instagram" ? "Instagram" : "Facebook"}
+                imageUrl={option?.imageUrl || ""}
+                businessName={businessName}
+                handle={displayHandle}
+                location={postLocation}
+                headline={headline}
+                caption={caption}
+                logoUrl={logoUrl}
+                format={option?.format}
+                showPlatformToggle={false}
+              />
+            </div>
+          )}
         </div>
       </section>
       <section className="rounded-2xl border border-white/[0.08] bg-card/80 p-6 sm:p-8 shadow-xl backdrop-blur-sm">
@@ -3230,7 +4627,9 @@ function PublishStep({
                 ? "bg-primary text-white shadow-sm shadow-primary/25"
                 : "text-muted-foreground hover:text-foreground"
             }`}
-            onClick={() => onCaption(caption)}
+            onClick={() => {
+              if (onToggleOwnCaption) onToggleOwnCaption(true);
+            }}
           >
             Write my own
           </Button>
@@ -3241,7 +4640,10 @@ function PublishStep({
                 ? "bg-primary text-white shadow-sm shadow-primary/25"
                 : "text-muted-foreground hover:text-foreground"
             }`}
-            onClick={onSuggest}
+            onClick={() => {
+              if (onToggleOwnCaption) onToggleOwnCaption(false);
+              onSuggest();
+            }}
           >
             Suggest captions
           </Button>
@@ -3253,41 +4655,448 @@ function PublishStep({
               id="caption-text"
               className="mt-4 min-h-36 resize-y text-sm leading-6 rounded-2xl border-white/[0.08] bg-secondary/50 p-4 focus:bg-background/90"
               maxLength={2200}
-              placeholder="A good caption that shares what's new and engages your followers…"
+              placeholder="A good caption that shares what's new and engages your followers… You can type hashtags directly using #hashtags"
               value={caption}
               onChange={(event) => onCaption(event.target.value)}
             />
-            <div className="mt-1.5 text-right text-[11px] font-mono text-muted-foreground">{caption.length} / 2,200</div>
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground font-semibold flex items-center gap-1">
+                  <Hash className="h-3 w-3 text-primary" /> Click to add tag:
+                </span>
+                {quickHashtags.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => insertHashtag(tag)}
+                    className="px-2 py-0.5 rounded-md text-[11px] bg-secondary/70 hover:bg-primary/20 hover:text-primary text-muted-foreground border border-white/5 transition-colors"
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+              <div className="text-right text-[11px] font-mono text-muted-foreground">{caption.length} / 2,200</div>
+            </div>
           </>
         ) : (
-          <div className="mt-4 space-y-2.5">
+          <div className="mt-4 space-y-3">
             {suggesting ? (
               <div className="flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-secondary/30 p-6 text-sm text-muted-foreground">
                 <LoaderCircle className="h-5 w-5 animate-spin text-primary" /> Finding the right words…
               </div>
             ) : (
-              suggestions.map((item, index) => (
-                <button
-                  key={item}
-                  onClick={() => onChooseSuggestion(item)}
-                  className={`w-full rounded-xl border p-3.5 text-left text-xs leading-5 transition-all ${
-                    caption === item
-                      ? "border-primary bg-primary/10 shadow-xs ring-1 ring-primary/40 font-medium"
-                      : "border-white/[0.08] bg-secondary/30 hover:border-primary/40 text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-primary">Option {index + 1}</span>
-                  {item}
-                </button>
-              ))
-            )}
-            {!suggesting && suggestions.length > 0 && (
-              <Button variant="ghost" size="sm" className="mt-1 h-8 px-2 text-xs text-primary font-semibold hover:bg-primary/10" onClick={onSuggest}>
-                <Sparkles className="h-3.5 w-3.5 mr-1" /> Regenerate suggestions
-              </Button>
+              <>
+                <div className="space-y-2">
+                  {suggestions.map((item, index) => {
+                    const isSelected = caption === item || (caption && item.startsWith(caption.slice(0, 30)));
+                    return (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => onChooseSuggestion(item)}
+                        className={`w-full rounded-xl border p-3.5 text-left text-xs leading-5 transition-all ${
+                          isSelected
+                            ? "border-primary bg-primary/10 shadow-xs ring-1 ring-primary/40 font-medium text-foreground"
+                            : "border-white/[0.08] bg-secondary/30 hover:border-primary/40 text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-primary">Option {index + 1}</span>
+                          {isSelected && (
+                            <span className="text-[10px] font-bold text-primary flex items-center gap-1">
+                              <Check className="h-3 w-3" /> Selected
+                            </span>
+                          )}
+                        </div>
+                        {item}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Direct Editing of the Selected Suggested Caption */}
+                {caption && (
+                  <div className="mt-3 rounded-2xl border border-primary/25 bg-secondary/40 p-4 space-y-2.5 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                        <Edit3 className="h-3.5 w-3.5" />
+                        <span>Edit your chosen caption:</span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          if (onToggleOwnCaption) onToggleOwnCaption(true);
+                        }}
+                      >
+                        Switch to full manual editor →
+                      </Button>
+                    </div>
+                    <Textarea
+                      className="min-h-24 resize-y text-xs leading-5 rounded-xl border-white/10 bg-background/80 p-3 focus:bg-background"
+                      value={caption}
+                      maxLength={2200}
+                      onChange={(e) => onCaption(e.target.value)}
+                      placeholder="Make minor adjustments, add custom words or hashtags..."
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] text-muted-foreground font-semibold flex items-center gap-1">
+                          <Hash className="h-3 w-3 text-primary" /> Add tag:
+                        </span>
+                        {quickHashtags.map((tag) => (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => insertHashtag(tag)}
+                            className="px-2 py-0.5 rounded-md text-[11px] bg-secondary/70 hover:bg-primary/20 hover:text-primary text-muted-foreground border border-white/5 transition-colors"
+                          >
+                            {tag}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="text-[10px] font-mono text-muted-foreground">{caption.length} / 2,200</div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-1">
+                  <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-primary font-semibold hover:bg-primary/10" onClick={onSuggest}>
+                    <Sparkles className="h-3.5 w-3.5 mr-1" /> Regenerate suggestions
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      if (onToggleOwnCaption) onToggleOwnCaption(true);
+                    }}
+                  >
+                    Want full manual control? Write your own →
+                  </Button>
+                </div>
+              </>
             )}
           </div>
         )}
+
+        {/* ─── Location Tagging & Dynamic Regional Hashtags ─── */}
+        <div className="mt-6 rounded-2xl border border-white/[0.08] bg-card/60 p-4 sm:p-5 shadow-lg backdrop-blur-md">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] pb-3 mb-4">
+            <div className="flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                <MapPin className="h-4 w-4" />
+              </span>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                  Location Tag & Regional Hashtags
+                </h3>
+                <p className="text-[11px] text-muted-foreground">
+                  Tag a place on Instagram/Facebook & generate local area hashtags
+                </p>
+              </div>
+            </div>
+            {postLocation && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-semibold text-primary border border-primary/20">
+                <MapPin className="h-3 w-3" /> Tagged: {postLocation}
+              </span>
+            )}
+          </div>
+
+          {/* Location Input */}
+          <div className="space-y-1.5 mb-4">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-muted-foreground">
+                Post Location Tag
+              </label>
+              {postLocation && (
+                <button
+                  type="button"
+                  onClick={() => onLocationChange?.("")}
+                  className="text-[11px] text-rose-400 hover:underline"
+                >
+                  Clear location
+                </button>
+              )}
+            </div>
+            <div className="relative">
+              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={postLocation}
+                onChange={(e) => onLocationChange?.(e.target.value)}
+                placeholder="e.g. Rajpath Club Ground, Ahmedabad or Midtown, New York"
+                className="h-10 pl-9 pr-24 rounded-xl bg-secondary/50 border-white/10 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-primary/50"
+              />
+              {brandKitLocation && postLocation !== brandKitLocation && (
+                <button
+                  type="button"
+                  onClick={() => onLocationChange?.(brandKitLocation)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 transition-colors"
+                  title={`Use brand location: ${brandKitLocation}`}
+                >
+                  Use {brandKitLocation}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Dynamic Geo Hashtags Selector */}
+          <div className="rounded-xl border border-white/[0.06] bg-secondary/30 p-3 sm:p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Hash className="h-3.5 w-3.5 text-primary" /> Dynamic Location Hashtags
+              </span>
+              <span className="text-[10px] text-muted-foreground">Country → City → Area / ZIP</span>
+            </div>
+
+            {/* Quick Search & Filter bar for any city / zip */}
+            <div className="relative mb-3">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={citySearchFilter}
+                  onChange={(e) => setCitySearchFilter(e.target.value)}
+                  placeholder="Filter by city, state name, or ZIP code (e.g. Houston, Austin, Dallas, 77002, 90210)..."
+                  className="h-8 pl-8 pr-8 rounded-lg bg-background/80 border-white/[0.08] text-xs text-foreground placeholder:text-muted-foreground/60"
+                />
+                {isSearchingLive && (
+                  <LoaderCircle className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-primary" />
+                )}
+              </div>
+
+              {/* Live Location Results Autocomplete Panel via OpenStreetMap Nominatim & Zippopotam */}
+              {liveLocationSearchResults.length > 0 && (
+                <div className="absolute left-0 right-0 top-full mt-1.5 rounded-xl border border-primary/30 bg-card/95 p-2 shadow-2xl backdrop-blur-xl space-y-1 z-30">
+                  <div className="flex items-center justify-between px-2 py-1 text-[10px] font-semibold text-primary">
+                    <span className="flex items-center gap-1">
+                      <Sparkles className="h-3 w-3" /> Live Geocoding Results (OpenStreetMap & Zippopotam)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setLiveLocationSearchResults([])}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                    {liveLocationSearchResults.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between p-2 rounded-lg bg-secondary/50 hover:bg-primary/15 hover:border-primary/30 border border-white/5 transition-all text-xs cursor-pointer group"
+                        onClick={() => {
+                          onLocationChange?.(item.shortLabel || item.name);
+                          if (item.hashtags && item.hashtags.length > 0) {
+                            setSelectedGeoTags((prev) => Array.from(new Set([...item.hashtags.slice(0, 8), ...prev])));
+                          }
+                          if (item.countryCode) {
+                            const matched = geoCountries.find((c) => c.code.toLowerCase() === item.countryCode.toLowerCase());
+                            if (matched) setGeoCountry(matched.id);
+                          }
+                          setLiveLocationSearchResults([]);
+                        }}
+                      >
+                        <div className="min-w-0 pr-2">
+                          <p className="font-semibold text-foreground group-hover:text-primary flex items-center gap-1 truncate">
+                            <MapPin className="h-3 w-3 text-primary shrink-0" />
+                            {item.shortLabel || item.name}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground truncate">{item.label}</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="shrink-0 px-2 py-1 rounded-md text-[10px] font-bold bg-primary text-white group-hover:bg-primary/90 shadow-xs"
+                        >
+                          Select & Tag
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+              {/* Country */}
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Country</label>
+                <select
+                  value={geoCountry}
+                  onChange={(e) => {
+                    const nextCountry = e.target.value;
+                    setGeoCountry(nextCountry);
+                    setGeoState("all");
+                    setCitySearchFilter("");
+                    const cities = getGeoCities(nextCountry);
+                    const defaultCity = cities[0]?.id || "";
+                    setGeoCity(defaultCity);
+                    const areas = getGeoAreas(nextCountry, defaultCity);
+                    setGeoArea(areas[0]?.id || "");
+                  }}
+                  className="flex h-9 w-full rounded-lg border border-white/[0.08] bg-background px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                >
+                  {geoCountries.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.flag} {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* State / Region */}
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                  State / Region {availableStates.length > 0 && `(${availableStates.length})`}
+                </label>
+                <select
+                  value={geoState}
+                  onChange={(e) => {
+                    const nextState = e.target.value;
+                    setGeoState(nextState);
+                    const cities = getGeoCities(geoCountry, nextState === "all" ? undefined : nextState);
+                    if (cities[0]) {
+                      setGeoCity(cities[0].id);
+                      const areas = getGeoAreas(geoCountry, cities[0].id);
+                      setGeoArea(areas[0]?.id || "");
+                    }
+                  }}
+                  className="flex h-9 w-full rounded-lg border border-white/[0.08] bg-background px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                >
+                  <option value="all">All States & Regions</option>
+                  {availableStates.map((st) => (
+                    <option key={st.code} value={st.code}>
+                      {st.name} ({st.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* City */}
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                  City {availableCities.length > 0 && `(${availableCities.length}${liveCities ? " · Live API" : ""})`}
+                  {loadingLiveCities && <LoaderCircle className="inline h-3 w-3 animate-spin text-primary ml-1" />}
+                </label>
+                <select
+                  value={geoCity}
+                  onChange={(e) => {
+                    const nextCity = e.target.value;
+                    setGeoCity(nextCity);
+                    const areas = getGeoAreas(geoCountry, nextCity);
+                    setGeoArea(areas[0]?.id || "");
+                  }}
+                  className="flex h-9 w-full rounded-lg border border-white/[0.08] bg-background px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                >
+                  {availableCities.map((city) => (
+                    <option key={city.id} value={city.id}>
+                      {city.name} {city.stateCode ? `(${city.stateCode})` : city.stateOrRegion ? `(${city.stateOrRegion})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Area & Postal/ZIP Code */}
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                  Area / Postal ZIP Code
+                </label>
+                <select
+                  value={geoArea}
+                  onChange={(e) => setGeoArea(e.target.value)}
+                  className="flex h-9 w-full rounded-lg border border-white/[0.08] bg-background px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                >
+                  <option value="">All areas & city-wide</option>
+                  {availableAreas.map((area) => (
+                    <option key={area.id} value={area.id}>
+                      {area.postalCode ? `${area.postalCode} — ` : ""}{area.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Quick action to set chosen area as location tag */}
+            {selectedAreaObj && (
+              <div className="mt-2.5 flex items-center justify-between text-[11px] pt-1">
+                <span className="text-muted-foreground">
+                  Area: <strong>{selectedAreaObj.name}</strong> ({selectedAreaObj.postalCode})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const loc = `${selectedAreaObj.name}, ${selectedCityObj?.name || ""}`.replace(/^,\s*|,\s*$/g, "");
+                    onLocationChange?.(loc);
+                  }}
+                  className="text-primary font-semibold hover:underline flex items-center gap-1"
+                >
+                  <MapPin className="h-3 w-3" /> Set as post location
+                </button>
+              </div>
+            )}
+
+            {/* Suggested Hashtags List with Multi-Select */}
+            <div className="mt-3.5 border-t border-white/[0.06] pt-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <span className="text-[11px] font-semibold text-muted-foreground">
+                  Suggested Hashtags ({suggestedGeoHashtags.length} available)
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleToggleSelectAllHashtags}
+                    className="text-[11px] font-semibold text-primary hover:underline"
+                  >
+                    {isAllGeoSelected ? "Deselect all" : "Select all"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddSelectedToCaption}
+                    disabled={selectedGeoTags.length === 0}
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-primary text-white hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed shadow-xs transition-all flex items-center gap-1"
+                  >
+                    <Plus className="h-3 w-3" /> Add ({selectedGeoTags.length}) to caption
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
+                {suggestedGeoHashtags.map((tag) => {
+                  const isChecked = selectedGeoTags.includes(tag);
+                  const isAlreadyInCaption = caption.toLowerCase().includes(tag.toLowerCase());
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => handleToggleGeoTag(tag)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                        isAlreadyInCaption
+                          ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                          : isChecked
+                          ? "bg-primary/20 text-primary border border-primary/40 font-semibold"
+                          : "bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border border-white/5"
+                      }`}
+                    >
+                      <span>{tag}</span>
+                      {isAlreadyInCaption ? (
+                        <Check className="h-3 w-3 text-emerald-400 stroke-[3]" />
+                      ) : isChecked ? (
+                        <Check className="h-3 w-3 text-primary stroke-[3]" />
+                      ) : (
+                        <Plus className="h-3 w-3 opacity-60" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-[10px] text-muted-foreground">
+                Tip: Click any hashtag to toggle selection, or green checkmark means it's already in your active caption.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div className="mt-6 border-t border-white/[0.08] pt-5">
           <div className="flex items-baseline justify-between mb-2">
             <div>
@@ -3374,13 +5183,102 @@ function PublishStep({
               aria-pressed={timing === "schedule"}
             >
               Schedule
+              <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                scheduledCount >= 10
+                  ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                  : "bg-white/10 text-white/90"
+              }`}>
+                {scheduledCount}/10
+              </span>
             </Button>
           </div>
           {timing === "schedule" && (
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <label className="text-xs font-semibold text-muted-foreground">Day<Input className="mt-1.5 text-foreground rounded-xl" type="date" value={scheduledDate} onChange={(event) => onDate(event.target.value)} /></label>
-              <label className="text-xs font-semibold text-muted-foreground">Time<Input className="mt-1.5 text-foreground rounded-xl" type="time" value={scheduledTime} onChange={(event) => onTime(event.target.value)} /></label>
-              <p className="sm:col-span-2 text-xs text-muted-foreground">Times shown in your local timezone.</p>
+            <div className="mt-4 space-y-3">
+              {scheduledCount >= 10 && (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+                  <p className="font-semibold text-amber-400">Schedule limit reached ({scheduledCount}/10 active posts)</p>
+                  <p className="mt-0.5 text-muted-foreground">
+                    You can have a maximum of 10 active scheduled posts in your calendar queue. Please wait for an existing post to publish or delete one from your calendar to schedule more.
+                  </p>
+                </div>
+              )}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs font-semibold text-muted-foreground flex flex-col gap-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <CalendarDays className="h-3.5 w-3.5 text-primary" />
+                    <span>Select Date</span>
+                  </span>
+                  <Input
+                    className="h-11 text-foreground rounded-xl bg-secondary/50 border-white/10 [color-scheme:dark] cursor-pointer px-3 text-sm focus:border-primary/50 transition-all font-medium"
+                    type="date"
+                    min={(() => {
+                      const d = new Date();
+                      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                    })()}
+                    value={scheduledDate}
+                    onClick={(e) => e.currentTarget.showPicker?.()}
+                    onChange={(event) => onDate(event.target.value)}
+                  />
+                </label>
+                <label className="text-xs font-semibold text-muted-foreground flex flex-col gap-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <Clock3 className="h-3.5 w-3.5 text-primary" />
+                    <span>Select Time</span>
+                  </span>
+                  <Input
+                    className="h-11 text-foreground rounded-xl bg-secondary/50 border-white/10 [color-scheme:dark] cursor-pointer px-3 text-sm focus:border-primary/50 transition-all font-medium"
+                    type="time"
+                    value={scheduledTime}
+                    onClick={(e) => e.currentTarget.showPicker?.()}
+                    onChange={(event) => onTime(event.target.value)}
+                  />
+                </label>
+              </div>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="text-[11px] text-muted-foreground font-medium">Quick Pick:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tmrw = new Date();
+                    tmrw.setDate(tmrw.getDate() + 1);
+                    onDate(`${tmrw.getFullYear()}-${String(tmrw.getMonth() + 1).padStart(2, "0")}-${String(tmrw.getDate()).padStart(2, "0")}`);
+                    onTime("10:00");
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-xs bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border border-white/5 transition-all"
+                >
+                  Tomorrow 10:00 AM
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tmrw = new Date();
+                    tmrw.setDate(tmrw.getDate() + 1);
+                    onDate(`${tmrw.getFullYear()}-${String(tmrw.getMonth() + 1).padStart(2, "0")}-${String(tmrw.getDate()).padStart(2, "0")}`);
+                    onTime("18:00");
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-xs bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border border-white/5 transition-all"
+                >
+                  Tomorrow 6:00 PM
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sat = new Date();
+                    const day = sat.getDay();
+                    const diff = (6 - day + 7) % 7 || 7;
+                    sat.setDate(sat.getDate() + diff);
+                    onDate(`${sat.getFullYear()}-${String(sat.getMonth() + 1).padStart(2, "0")}-${String(sat.getDate()).padStart(2, "0")}`);
+                    onTime("12:00");
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-xs bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground border border-white/5 transition-all"
+                >
+                  This Weekend (Sat 12 PM)
+                </button>
+              </div>
+
+              <p className="text-xs text-muted-foreground/80">Times shown in your local timezone.</p>
             </div>
           )}
         </div>
@@ -3390,13 +5288,123 @@ function PublishStep({
           </Button>
           <Button
             className="h-11 px-7 rounded-xl font-semibold gap-2 shadow-lg shadow-primary/25 hover:shadow-primary/40"
-            disabled={connectedAccounts.length > 0 && selectedAccountIds.length === 0}
+            disabled={
+              (connectedAccounts.length > 0 && selectedAccountIds.length === 0) ||
+              (timing === "schedule" && scheduledCount >= 10)
+            }
             onClick={onSubmit}
           >
-            {timing === "now" ? "Post now" : "Schedule post"}<ArrowRight className="h-4 w-4 stroke-[2.5]" />
+            {timing === "now"
+              ? "Post now"
+              : scheduledCount >= 10
+              ? "Schedule limit reached"
+              : "Schedule post"}<ArrowRight className="h-4 w-4 stroke-[2.5]" />
           </Button>
         </div>
       </section>
+
+      {/* Preview Full Size Modal in Publish Step with Feed Preview Tabs */}
+      <Dialog open={previewZoomOpen} onOpenChange={setPreviewZoomOpen}>
+        <DialogContent className="sm:max-w-3xl p-3 sm:p-5 bg-card/95 backdrop-blur-2xl border-white/10 rounded-3xl overflow-hidden shadow-2xl">
+          <DialogHeader className="flex flex-row items-center justify-between pb-3 border-b border-white/5">
+            <div>
+              <DialogTitle className="font-display text-lg text-foreground truncate max-w-lg">
+                {headline || "Full Poster Preview"}
+              </DialogTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {zoomLightboxTab === "poster"
+                  ? "Full-resolution view of your chosen flyer"
+                  : zoomLightboxTab === "instagram"
+                  ? "Live Instagram Feed Mockup with your caption"
+                  : "Live Facebook Feed Mockup with your caption"}
+              </p>
+            </div>
+            {/* View Selector Tabs */}
+            <div className="flex items-center gap-1 rounded-xl border border-white/[0.08] bg-black/40 p-1">
+              <button
+                type="button"
+                onClick={() => setZoomLightboxTab("poster")}
+                className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${
+                  zoomLightboxTab === "poster"
+                    ? "bg-secondary text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Poster
+              </button>
+              <button
+                type="button"
+                onClick={() => setZoomLightboxTab("instagram")}
+                className={`rounded-lg px-2.5 py-1 text-xs font-semibold flex items-center gap-1 transition-all ${
+                  zoomLightboxTab === "instagram"
+                    ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Instagram className="h-3 w-3" /> Instagram
+              </button>
+              <button
+                type="button"
+                onClick={() => setZoomLightboxTab("facebook")}
+                className={`rounded-lg px-2.5 py-1 text-xs font-semibold flex items-center gap-1 transition-all ${
+                  zoomLightboxTab === "facebook"
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span className="font-bold text-[10px]">f</span> Facebook
+              </button>
+            </div>
+          </DialogHeader>
+
+          <div className="relative flex items-center justify-center rounded-2xl overflow-y-auto bg-black/50 border border-white/5 max-h-[75vh] p-4 mt-2">
+            {option?.imageUrl && (
+              zoomLightboxTab === "poster" ? (
+                <img
+                  src={option.imageUrl}
+                  alt="Full size poster"
+                  className="max-h-[70vh] w-auto max-w-full object-contain rounded-xl shadow-2xl"
+                />
+              ) : (
+                <SocialFeedPreview
+                  platform={zoomLightboxTab === "instagram" ? "Instagram" : "Facebook"}
+                  imageUrl={option.imageUrl}
+                  businessName={businessName}
+                  handle={displayHandle}
+                  location={postLocation}
+                  headline={headline}
+                  caption={caption}
+                  logoUrl={logoUrl}
+                  format={option?.format}
+                  showPlatformToggle={false}
+                />
+              )
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-3 pt-3 border-t border-white/5 mt-1">
+            <span className="text-[11px] text-muted-foreground">
+              Click anywhere outside or press Esc to close
+            </span>
+            {option?.imageUrl && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs gap-1.5 rounded-xl border-white/10 hover:bg-secondary/60"
+                onClick={() => {
+                  const a = document.createElement("a");
+                  a.href = option.imageUrl!;
+                  a.target = "_blank";
+                  a.rel = "noopener noreferrer";
+                  a.download = "poster-full-size.png";
+                  a.click();
+                }}
+              >
+                <ArrowDownToLine className="h-3.5 w-3.5" /> Download original
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -3415,8 +5423,12 @@ function ScheduledPage({
   onSelectPost?: ((post: SocialPost) => void) | undefined;
 }) {
   const [view, setView] = useState<"list" | "calendar">("list");
-  const [month, setMonth] = useState(new Date(2026, 9, 1));
-  const scheduled = posts.filter((post) => post.status === "Scheduled").sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+  const [month, setMonth] = useState(() => new Date());
+  const scheduled = posts.filter((post) => post.status === "Scheduled").sort((a, b) => {
+    const aDate = a.date instanceof Date ? a.date.toISOString().slice(0, 10) : String(a.date || "");
+    const bDate = b.date instanceof Date ? b.date.toISOString().slice(0, 10) : String(b.date || "");
+    return `${aDate} ${a.time || ""}`.localeCompare(`${bDate} ${b.time || ""}`);
+  });
   const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
   const firstDay = new Date(month.getFullYear(), month.getMonth(), 1).getDay();
   const monthLabel = month.toLocaleDateString("en-US", { month: "long", year: "numeric" });
@@ -3495,7 +5507,14 @@ function ScheduledPage({
           ))}
           {Array.from({ length: firstDay + daysInMonth }, (_, index) => {
             const day = index - firstDay + 1;
-            const matches = scheduled.filter((post) => Number(post.date.slice(-2)) === day && Number(post.date.slice(5, 7)) === month.getMonth() + 1 && Number(post.date.slice(0, 4)) === month.getFullYear());
+            const matches = scheduled.filter((post) => {
+              const dStr = post.date instanceof Date ? post.date.toISOString().slice(0, 10) : String(post.date || "");
+              return (
+                Number(dStr.slice(-2)) === day &&
+                Number(dStr.slice(5, 7)) === month.getMonth() + 1 &&
+                Number(dStr.slice(0, 4)) === month.getFullYear()
+              );
+            });
             return (
               <div key={index} className={`min-h-[76px] border-b border-r border-white/[0.08] p-1.5 sm:min-h-28 sm:p-2.5 ${day < 1 ? "bg-secondary/20" : "bg-card/70"}`}>
                 <span className={`text-[10px] sm:text-xs font-semibold ${day === 17 && month.getMonth() === 9 ? "flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white" : "text-muted-foreground"}`}>{day > 0 ? day : ""}</span>
@@ -3862,11 +5881,13 @@ function BrandKit({
   onSave: (updated: BrandKitData) => void;
 }) {
   const [name, setName] = useState(data.businessName || "Avero Innovations");
-  const [tagline, setTagline] = useState(data.tagline || "Ideas into scalable products.");
-  const [location, setLocation] = useState(data.location || "Online / Global");
+  const [tagline, setTagline] = useState(data.tagline || "");
+  const [location, setLocation] = useState(data.location || "");
   const [phone, setPhone] = useState(data.phone || "");
-  const [colors, setColors] = useState<string[]>(data.colors && data.colors.length > 0 ? data.colors : ["Tomato", "Olive"]);
-  const [font, setFont] = useState(data.font || "Fraunces");
+  const [website, setWebsite] = useState(data.website || "");
+  const [email, setEmail] = useState(data.email || "");
+  const [colors, setColors] = useState<string[]>(data.colors && data.colors.length > 0 ? data.colors : ["#00A896", "#028090", "#05668D", "#02C39A"]);
+  const [font, setFont] = useState(data.font || "Work Sans");
   const [logoName, setLogoName] = useState(data.logoName || "");
   const [logoUrl, setLogoUrl] = useState(data.logoUrl || "");
   const [tone, setTone] = useState(data.tone || "Friendly");
@@ -3879,14 +5900,16 @@ function BrandKit({
     setTagline(data.tagline || "");
     setLocation(data.location || "");
     setPhone(data.phone || "");
-    setColors(data.colors && data.colors.length > 0 ? data.colors : ["Tomato", "Olive"]);
-    setFont(data.font || "Fraunces");
+    setWebsite(data.website || "");
+    setEmail(data.email || "");
+    setColors(data.colors && data.colors.length > 0 ? data.colors : ["#00A896", "#028090", "#05668D", "#02C39A"]);
+    setFont(data.font || "Work Sans");
     setLogoName(data.logoName || "");
     setLogoUrl(data.logoUrl || "");
     setTone(data.tone || "Friendly");
     setTimezone(data.timezone || "Asia/Kolkata");
     setDefaultHashtags(data.defaultHashtags || "");
-  }, [data.businessId, data.businessName, data.logoUrl]);
+  }, [data.businessId, data.businessName, data.logoUrl, data.phone, data.website, data.email, data.location, data.font, data.colors]);
 
   const toggleColor = (color: string) =>
     setColors(
@@ -3908,6 +5931,8 @@ function BrandKit({
       tagline: tagline.trim(),
       location: location.trim(),
       phone: phone.trim(),
+      website: website.trim(),
+      email: email.trim(),
       colors: colors.length > 0 ? colors : ["Tomato", "Olive"],
       font,
       logoName,
@@ -3978,33 +6003,8 @@ function BrandKit({
               <LabeledInput label="Tagline" value={tagline} onChange={setTagline} />
               <LabeledInput label="Location" value={location} onChange={setLocation} />
               <LabeledInput label="Phone" value={phone} onChange={setPhone} />
-            </div>
-          </section>
-          <section className="border-b border-white/[0.08] pb-7">
-            <div className="flex items-baseline justify-between">
-              <h2 className="font-display text-2xl font-semibold text-foreground">Your colors</h2>
-              <span className="text-xs text-muted-foreground">Pick up to three</span>
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2.5">
-              {palette.map((color) => {
-                const isSelected = colors.includes(color.name);
-                return (
-                  <button
-                    key={color.name}
-                    onClick={() => toggleColor(color.name)}
-                    className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-xs font-medium transition-all ${
-                      isSelected
-                        ? "border-primary bg-primary/10 text-primary shadow-xs"
-                        : "border-white/[0.08] bg-secondary/30 text-muted-foreground hover:border-white/20 hover:text-foreground"
-                    }`}
-                    aria-pressed={isSelected}
-                  >
-                    <span className={`brand-swatch ${color.className}`} />
-                    <span>{color.name}</span>
-                    {isSelected && <Check className="h-3 w-3 text-primary ml-0.5" />}
-                  </button>
-                );
-              })}
+              <LabeledInput label="Website" value={website} onChange={setWebsite} />
+              <LabeledInput label="Email" value={email} onChange={setEmail} />
             </div>
           </section>
           <section className="border-b border-white/[0.08] pb-7">

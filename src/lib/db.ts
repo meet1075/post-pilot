@@ -27,6 +27,44 @@ export function getDb(): ReturnType<typeof neon> {
   return _sql;
 }
 
+let _schemaEnsured = false;
+let _schemaPromise: Promise<void> | null = null;
+
+export async function ensureSchema(): Promise<void> {
+  if (_schemaEnsured) return;
+  if (_schemaPromise) return _schemaPromise;
+
+  _schemaPromise = (async () => {
+    try {
+      const sql = getDb();
+      // Ensure missing columns exist in whatever Neon DB branch Vercel connects to
+      const stmts = [
+        "ALTER TABLE brand_kits ADD COLUMN IF NOT EXISTS location TEXT",
+        "ALTER TABLE brand_kits ADD COLUMN IF NOT EXISTS website TEXT",
+        "ALTER TABLE brand_kits ADD COLUMN IF NOT EXISTS email TEXT",
+        "ALTER TABLE brand_kits ADD COLUMN IF NOT EXISTS phone TEXT",
+        "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS location TEXT",
+        "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS phone TEXT",
+        "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS website TEXT",
+        "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS email TEXT",
+        "ALTER TABLE posts ADD COLUMN IF NOT EXISTS location TEXT",
+      ];
+      for (const stmt of stmts) {
+        try {
+          await (sql as any).query(stmt);
+        } catch {
+          // Fallback or ignore if table does not exist or already added
+        }
+      }
+      _schemaEnsured = true;
+    } catch {
+      _schemaEnsured = true;
+    }
+  })();
+
+  return _schemaPromise;
+}
+
 /**
  * Type-safe query wrapper with automatic error logging.
  */
@@ -34,6 +72,9 @@ export async function query<T = Record<string, unknown>>(
   template: TemplateStringsArray,
   ...values: unknown[]
 ): Promise<T[]> {
+  if (!_schemaEnsured) {
+    await ensureSchema();
+  }
   const sql = getDb();
   try {
     const rows = await sql(template, ...values);

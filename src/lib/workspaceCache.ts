@@ -14,6 +14,8 @@ export interface BrandKitData {
   defaultHashtags?: string | undefined;
   logoName?: string | undefined;
   logoUrl?: string | undefined;
+  website?: string | undefined;
+  email?: string | undefined;
 }
 
 export interface CachedConnectedAccount {

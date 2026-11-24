@@ -57,6 +57,8 @@ export const createBusinessSchema = z.object({
   default_hashtags: z.string().max(2000).optional().nullable().default(""),
   location: z.string().max(300, "Location cannot exceed 300 characters").optional().nullable().default(""),
   phone: z.string().optional().nullable().default(""),
+  website: z.string().max(200).optional().nullable().default(""),
+  email: z.string().optional().nullable().default(""),
   timezone: z.string().max(100).default("UTC"),
   business_type: z.string().max(50).default("General"),
 });
@@ -72,10 +74,16 @@ export const deleteBusinessSchema = z.object({
 // ─── Brand Kit ────────────────────────────────────────────────────────────────
 
 export const updateBrandKitSchema = z.object({
+  business_id: z.string().optional(),
   colors: z.array(z.string().max(50)).max(5, "Maximum 5 brand colors allowed").optional(),
   font: z.string().max(100).optional(),
   caption_tone: toneSchema.optional(),
   default_hashtags: z.string().max(2000).optional(),
+  website: z.string().max(200).optional().nullable(),
+  email: z.string().optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  location: z.string().max(200).optional().nullable(),
+  logo_public_url: z.string().optional().nullable(),
 });
 
 // ─── Posts ────────────────────────────────────────────────────────────────────
@@ -97,6 +105,7 @@ export const createPostSchema = z.object({
   platform: platformSchema.default("Instagram"),
   theme: z.string().max(50).default("tomato"),
   price: z.string().max(100, "Price text cannot exceed 100 characters").default(""),
+  location: z.string().max(200, "Location cannot exceed 200 characters").optional().nullable().default(""),
   status: postStatusSchema.default("Draft"),
   image_url: z.string().optional().nullable(),
   business_id: z.string().optional(),
@@ -114,9 +123,32 @@ export const updatePostSchema = createPostSchema.partial().extend({
 export const generatePostersSchema = z.object({
   prompt: z.string().trim().min(1, "Please provide an idea or description for your post").max(2000, "Prompt cannot exceed 2,000 characters"),
   style: z.enum(["Bold", "Minimal", "Festive", "Elegant"]).default("Bold"),
-  format: z.enum(["Square", "Portrait 4:5", "Story"]).default("Portrait 4:5"),
+  format: z.string().default("Portrait 4:5"),
+  aspect_ratio: z.string().optional(),
   use_brand: z.boolean().default(true),
   count: z.number().int().min(1).max(4).default(2).optional(),
+  words_on_image: z.string().max(1000).optional().default(""),
+  size: z.string().max(100).optional().default("1K"),
+  reference_image_url: z.string().max(5000).optional().nullable(),
+  template_id: z.string().max(100).optional().nullable(),
+  ticked_details: z.object({
+    logo: z.boolean().optional(),
+    colors: z.boolean().optional(),
+    phone: z.boolean().optional(),
+    location: z.boolean().optional(),
+    website: z.boolean().optional(),
+    email: z.boolean().optional(),
+  }).optional(),
+  brand_details: z.object({
+    business_name: z.string().optional(),
+    tagline: z.string().optional(),
+    phone: z.string().optional(),
+    email: z.string().optional(),
+    website: z.string().optional(),
+    location: z.string().optional(),
+    logo_url: z.string().optional(),
+    colors: z.array(z.string()).optional(),
+  }).optional(),
   business_id: z.string().optional(),
   social_account_id: z.string().optional().nullable(),
 });

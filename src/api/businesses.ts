@@ -67,8 +67,12 @@ export const getBusiness = createServerFn({ method: "GET" })
         logo_public_url: string;
         caption_tone: string;
         default_hashtags: string;
+        website?: string | null;
+        email?: string | null;
+        phone?: string | null;
+        location?: string | null;
       }>`
-        SELECT colors, font, logo_public_url, caption_tone, default_hashtags
+        SELECT colors, font, logo_public_url, caption_tone, default_hashtags, website, email, phone, location
         FROM brand_kits WHERE business_id = ${business.id}
       `;
 
@@ -76,10 +80,15 @@ export const getBusiness = createServerFn({ method: "GET" })
         success: true,
         business: {
           ...business,
-          logo_url: business.logo_url || brandKit?.logo_public_url || null,
-          brand_colors: business.brand_colors || brandKit?.colors || ["Tomato"],
-          tone: business.tone || brandKit?.caption_tone || "Friendly",
-          default_hashtags: business.default_hashtags || brandKit?.default_hashtags || "",
+          location: brandKit?.location || business.location || "",
+          phone: brandKit?.phone || business.phone || "",
+          website: brandKit?.website || (business as any).website || "",
+          email: brandKit?.email || (business as any).email || "",
+          font: brandKit?.font || "Work Sans",
+          logo_url: brandKit?.logo_public_url || business.logo_url || null,
+          brand_colors: (brandKit?.colors && brandKit.colors.length > 0) ? brandKit.colors : (business.brand_colors || ["Tomato"]),
+          tone: brandKit?.caption_tone || business.tone || "Friendly",
+          default_hashtags: brandKit?.default_hashtags || business.default_hashtags || "",
         },
       };
     } catch (err) {
@@ -109,6 +118,8 @@ export const listUserBusinesses = createServerFn({ method: "GET" }).handler(
         timezone: string;
         location: string | null;
         phone: string | null;
+        website?: string | null;
+        email?: string | null;
         business_type: string;
         is_active: boolean;
         connected_accounts_count: string;
@@ -116,15 +127,25 @@ export const listUserBusinesses = createServerFn({ method: "GET" }).handler(
         updated_at: string;
       }>`
         SELECT
-          b.id, b.name, b.tagline, b.logo_url, b.brand_colors, b.tone,
-          b.default_hashtags, b.timezone, b.location, b.phone, b.business_type,
+          b.id, b.name, b.tagline,
+          COALESCE(bk.logo_public_url, b.logo_url) AS logo_url,
+          COALESCE(bk.colors, b.brand_colors) AS brand_colors,
+          COALESCE(bk.caption_tone, b.tone) AS tone,
+          COALESCE(bk.default_hashtags, b.default_hashtags) AS default_hashtags,
+          b.timezone,
+          COALESCE(bk.location, b.location) AS location,
+          COALESCE(bk.phone, b.phone) AS phone,
+          COALESCE(bk.website, b.website) AS website,
+          COALESCE(bk.email, b.email) AS email,
+          b.business_type,
           b.is_active, b.created_at, b.updated_at,
           COUNT(sa.id) FILTER (WHERE sa.status = 'connected' AND sa.deleted_at IS NULL) as connected_accounts_count
         FROM businesses b
+        LEFT JOIN brand_kits bk ON bk.business_id = b.id
         LEFT JOIN social_accounts sa ON sa.business_id = b.id
         WHERE (b.owner_id = ${session.userId} OR b.owner_user_id = ${session.userId})
           AND b.deleted_at IS NULL
-        GROUP BY b.id
+        GROUP BY b.id, bk.id
         ORDER BY b.created_at ASC
       `;
 
@@ -205,7 +226,7 @@ export const createBusiness = createServerFn({ method: "POST" })
       const [business] = await query<BusinessRowData>`
         INSERT INTO businesses (
           owner_id, owner_user_id, name, tagline, logo_url, brand_colors,
-          tone, default_hashtags, location, phone, timezone, business_type, zernio_profile_id
+          tone, default_hashtags, location, phone, website, email, timezone, business_type, zernio_profile_id
         )
         VALUES (
           ${session.userId},
@@ -218,6 +239,8 @@ export const createBusiness = createServerFn({ method: "POST" })
           ${d.default_hashtags || ""},
           ${d.location || ""},
           ${d.phone || ""},
+          ${d.website || ""},
+          ${d.email || ""},
           ${d.timezone || "UTC"},
           ${d.business_type || "General"},
           ${zernioProfileId}
@@ -229,19 +252,27 @@ export const createBusiness = createServerFn({ method: "POST" })
 
       // Auto-populate brand_kits table for compatibility
       await query`
-        INSERT INTO brand_kits (business_id, colors, caption_tone, default_hashtags, logo_public_url)
+        INSERT INTO brand_kits (business_id, colors, caption_tone, default_hashtags, logo_public_url, website, email, phone, location)
         VALUES (
           ${business.id},
           ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(d.brand_colors && d.brand_colors.length > 0 ? d.brand_colors : ["Tomato", "Olive"])}::jsonb)),
           ${d.tone || "Friendly"},
           ${d.default_hashtags || ""},
-          ${d.logo_url ?? null}
+          ${d.logo_url ?? null},
+          ${d.website || ""},
+          ${d.email || ""},
+          ${d.phone || ""},
+          ${d.location || ""}
         )
         ON CONFLICT (business_id) DO UPDATE SET
           colors = EXCLUDED.colors,
           caption_tone = EXCLUDED.caption_tone,
           default_hashtags = EXCLUDED.default_hashtags,
-          logo_public_url = COALESCE(EXCLUDED.logo_public_url, brand_kits.logo_public_url)
+          logo_public_url = COALESCE(EXCLUDED.logo_public_url, brand_kits.logo_public_url),
+          website = COALESCE(EXCLUDED.website, brand_kits.website),
+          email = COALESCE(EXCLUDED.email, brand_kits.email),
+          phone = COALESCE(EXCLUDED.phone, brand_kits.phone),
+          location = COALESCE(EXCLUDED.location, brand_kits.location)
       `;
 
       // Reissue a JWT with the new businessId
@@ -273,8 +304,7 @@ export const updateBusiness = createServerFn({ method: "POST" })
 
       const parsed = updateBusinessSchema.safeParse(data);
       if (!parsed.success) {
-        const firstIssue = parsed.error.issues[0]?.message;
-        throw new ValidationError(firstIssue ? `Invalid business data: ${firstIssue}` : "Invalid business data", formatZodIssues(parsed.error.issues));
+        throw new ValidationError("Invalid business data", formatZodIssues(parsed.error.issues));
       }
 
       const d = parsed.data;
@@ -298,6 +328,8 @@ export const updateBusiness = createServerFn({ method: "POST" })
           default_hashtags  = COALESCE(${d.default_hashtags ?? null}, default_hashtags),
           location          = COALESCE(${d.location ?? null}, location),
           phone             = COALESCE(${d.phone ?? null}, phone),
+          website           = COALESCE(${d.website ?? null}, website),
+          email             = COALESCE(${d.email ?? null}, email),
           timezone          = COALESCE(${d.timezone ?? null}, timezone),
           business_type     = COALESCE(${d.business_type ?? null}, business_type),
           updated_at        = now()
@@ -318,6 +350,10 @@ export const updateBusiness = createServerFn({ method: "POST" })
           caption_tone     = COALESCE(${d.tone ?? null}, caption_tone),
           default_hashtags = COALESCE(${d.default_hashtags ?? null}, default_hashtags),
           logo_public_url  = COALESCE(${d.logo_url ?? null}, logo_public_url),
+          website          = COALESCE(${d.website ?? null}, website),
+          email            = COALESCE(${d.email ?? null}, email),
+          phone            = COALESCE(${d.phone ?? null}, phone),
+          location         = COALESCE(${d.location ?? null}, location),
           updated_at       = now()
         WHERE business_id = ${targetBusinessId}
       `;

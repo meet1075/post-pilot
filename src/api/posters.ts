@@ -27,6 +27,8 @@ import {
 import { uploadPosterImage } from "../lib/storage.js";
 import { log } from "../lib/logger.js";
 import { apiSuccess, formatZodIssues } from "../lib/apiResponse.js";
+import { recordApiLog } from "../lib/auditLogger.js";
+import { getTemplateById } from "../lib/templates.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -48,13 +50,15 @@ export function getOpenAiApiKey(): string {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface FlyerBrief {
-  category?: "festival" | "food" | "celebration_event" | "product_tech" | "retail_sale" | "fitness_sports" | "general_commercial" | undefined;
+  category?: "festival" | "food" | "celebration_event" | "product_tech" | "retail_sale" | "fitness_sports" | "sports_tournament" | "general_commercial" | undefined;
   headline: string;
   hero_title?: string | undefined;
   price_text: string;
   badge_text?: string | undefined;
   date_text?: string | undefined;
+  time_text?: string | undefined;
   venue_text?: string | undefined;
+  prize_text?: string | undefined;
   features: string[];
   cta: string;
   scene: string;
@@ -69,7 +73,9 @@ export interface PosterOption {
   headline: string;
   price: string;
   date_text?: string | undefined;
+  time_text?: string | undefined;
   venue_text?: string | undefined;
+  prize_text?: string | undefined;
   footer: string;
   imageUrl?: string | undefined;
   format?: "Square" | "Portrait 4:5" | "Story" | undefined;
@@ -89,6 +95,68 @@ interface BrandKitRow {
   logo_public_url?: string | null;
 }
 
+// ─── Helpers for Structured Prompt & Product Extraction ───────────────────────
+
+export function isMetaPhrase(text: string): boolean {
+  if (!text || typeof text !== "string") return false;
+  return /^(?:black friday\s+)?(?:eye-catching\s+)?(?:premium\s+)?(?:promotional\s+)?(?:social media\s+)?(?:instagram\s+)?(?:facebook\s+)?(?:poster|flyer|banner|post|graphic|ad|advertisement|creative|campaign|design|image|photo)s?$/i.test(text.trim());
+}
+
+export function parseStructuredPrompt(prompt: string) {
+  const headlineMatch = prompt.match(/(?:\*\*\s*(?:Main\s+)?Headline:?\s*\*\*|(?:^|\n)\s*(?:Main\s+)?Headline:?)\s*([^\n*]+)/i);
+  const offerMatch = prompt.match(/(?:\*\*\s*(?:BIG\s+)?(?:Offer|Discount|Deal):?\s*\*\*|(?:^|\n)\s*(?:BIG\s+)?(?:Offer|Discount|Deal):?)\s*([^\n*]+)/i);
+  const supportingMatch = prompt.match(/(?:\*\*\s*(?:Supporting\s+Text|Subline|Subtitle|Tagline|Description):?\s*\*\*|(?:^|\n)\s*(?:Supporting\s+Text|Subline|Subtitle|Tagline|Description):?)\s*([^\n*]+)/i);
+  const ctaMatch = prompt.match(/(?:\*\*\s*(?:CTA|Call\s+to\s+Action):?\s*\*\*|(?:^|\n)\s*(?:CTA|Call\s+to\s+Action):?)\s*([^\n*]+)/i);
+  const venueMatch = prompt.match(/(?:\*\*\s*(?:Venue|Location|Place):?\s*\*\*|(?:^|\n)\s*(?:Venue|Location|Place):?)\s*([^\n*]+)/i);
+  const dateMatch = prompt.match(/(?:\*\*\s*(?:Date|Dates|Day):?\s*\*\*|(?:^|\n)\s*(?:Date|Dates|Day):?)\s*([^\n*]+)/i);
+  const timeMatch = prompt.match(/(?:\*\*\s*(?:Time|Timing|Hours):?\s*\*\*|(?:^|\n)\s*(?:Time|Timing|Hours):?)\s*([^\n*]+)/i);
+  const prizeMatch = prompt.match(/(?:\*\*\s*(?:Prize\s*Pool|Prize|Cash\s*Prize):?\s*\*\*|(?:^|\n)\s*(?:Prize\s*Pool|Prize|Cash\s*Prize):?)\s*([^\n*]+)/i);
+
+  return {
+    headline: headlineMatch?.[1]?.trim(),
+    offer: offerMatch?.[1]?.trim(),
+    supportingText: supportingMatch?.[1]?.trim(),
+    cta: ctaMatch?.[1]?.trim(),
+    venue: venueMatch?.[1]?.trim(),
+    date: dateMatch?.[1]?.trim(),
+    time: timeMatch?.[1]?.trim(),
+    prize: prizeMatch?.[1]?.trim(),
+  };
+}
+
+export function extractNamedProduct(prompt: string): string {
+  const forProductMatch = prompt.match(/\bfor\s+(?:\*\*)?([A-Za-z0-9\s&–—\-]+?)(?:\*\*)?(?:\.|\n|$|,)/i);
+  if (forProductMatch && forProductMatch[1]) {
+    const candidate = forProductMatch[1].trim();
+    if (!isMetaPhrase(candidate) && candidate.length > 2) {
+      return candidate;
+    }
+  }
+
+  const boldMatches = [...prompt.matchAll(/\*\*([^*]+)\*\*/g)];
+  for (const m of boldMatches) {
+    const text = m[1]?.trim() || "";
+    if (/^(?:main\s+)?headline:?|^(?:big\s+)?offer:?|^supporting\s+text:?|^cta:?|^design\s+direction:?/i.test(text)) {
+      continue;
+    }
+    if (!isMetaPhrase(text) && text.length > 2 && text.length < 60) {
+      return text;
+    }
+  }
+
+  const quotesMatch = prompt.match(/["']([^"']{2,60})["']/);
+  if (quotesMatch && quotesMatch[1] && !isMetaPhrase(quotesMatch[1])) {
+    return quotesMatch[1].trim();
+  }
+
+  const actionMatch = prompt.match(/\b(?:building|launching|introducing|announcing|presenting|creating|making)\s+([A-Za-z0-9\s–—\-]+?)(?:,\s*|\s+(?:an|a|the)\b)/i);
+  if (actionMatch && actionMatch[1] && !isMetaPhrase(actionMatch[1])) {
+    return actionMatch[1].trim();
+  }
+
+  return "";
+}
+
 // ─── Step 1: Flyer Brief Generation (gpt-4o-mini) ─────────────────────────────
 
 export async function generateFlyerBrief(opts: {
@@ -100,8 +168,22 @@ export async function generateFlyerBrief(opts: {
   tone?: string | undefined;
   location?: string | undefined;
   phone?: string | undefined;
+  email?: string | undefined;
+  website?: string | undefined;
+  wordsOnImage?: string | undefined;
+  tickedDetails?: {
+    logo?: boolean;
+    colors?: boolean;
+    phone?: boolean;
+    location?: boolean;
+    website?: boolean;
+    email?: boolean;
+  } | undefined;
   layout?: "full-bleed-cinematic" | "modern-editorial" | "hero-showcase" | "left-text-right-visual" | "centered-hero" | "bottom-banner" | undefined;
   directionIndex?: number | undefined;
+  format?: "Square" | "Portrait 4:5" | "Story" | undefined;
+  referenceImageUrl?: string | null | undefined;
+  templateId?: string | null | undefined;
 }): Promise<FlyerBrief> {
   const apiKey = getOpenAiApiKey();
   const model = process.env["OPENAI_MODEL"]?.trim() || "gpt-4o-mini";
@@ -111,13 +193,27 @@ export async function generateFlyerBrief(opts: {
   const brandColors = opts.colors?.join(", ") || "teal, navy blue, clean white";
   const brandTone = opts.tone || "Premium";
   const directionIndex = opts.directionIndex ?? 0;
+  const format = opts.format || "Portrait 4:5";
 
-  const directionVariation = directionIndex === 0
-    ? "Direction 1: Grand cinematic full-bleed advertisement with majestic focal lighting, large 3D display centerpiece title, and lavish atmospheric visual backdrop."
-    : "Direction 2: Bold modern editorial advertisement with dynamic angle, high-impact framing, punchy badges, and contemporary commercial typography.";
+  const formatInstruction = format === "Square"
+    ? "Instagram Square Post (1:1 aspect ratio, 1024x1024). Keep visual composition balanced and centered with high density."
+    : format === "Story"
+    ? "Instagram / Mobile Story (9:16 vertical full-screen aspect ratio, 1024x1792). Full vertical mobile layout with safe space at top and bottom."
+    : "Instagram Portrait Post (4:5 vertical aspect ratio, 1024x1280). Tall commercial flyer framing with prominent vertical hierarchy.";
 
-  const systemPrompt = `You are an elite commercial creative director and advertising copywriter creating a flyer brief for an Instagram advertisement (1024x1280 4:5 portrait).
-Your primary mission is to identify the EXACT domain and topic of the user's prompt and create an authentic, category-specific advertisement brief.
+  const directionConcepts = [
+    "Direction 1: Dynamic sports action & athletic intensity. Action photography of a batsman hitting a shot or bowler bowling on the pitch under brilliant stadium floodlights, motion blur, grass blades flying, dramatic sports photography (Sony A7 IV, 35mm f/1.8 aesthetic).",
+    "Direction 2: Prestigious championship celebration. A magnificent golden championship trophy cup in sharp focus on a pedestal bathed in stadium spotlights, with night stadium fireworks bursting over the arena. Energetic celebratory atmosphere with bokeh lights.",
+    "Direction 3: Team camaraderie & club pavilion. A cheerful, authentic group of corporate colleagues / teammates in team t-shirts in a celebratory team huddle on the lush green Rajpath Club field, looking enthusiastic under stadium floodlights.",
+    "Direction 4: Modern high-contrast sports editorial poster. Dramatic stadium floodlight silhouette against a deep twilight gradient sky, with bold typography highlighting the Dates, Match Timing, and ₹1 Lakh Prize Pool.",
+  ];
+  const directionVariation = directionConcepts[directionIndex % directionConcepts.length];
+
+  const structured = parseStructuredPrompt(opts.prompt);
+  const namedProduct = extractNamedProduct(opts.prompt);
+
+  const systemPrompt = `You are an elite commercial creative director and advertising copywriter creating a flyer brief for an Instagram advertisement (${formatInstruction}).
+Your primary mission is to identify the EXACT domain and topic of the user's prompt and create an authentic, category-specific advertisement brief tailored for this format.
 
 You are creating: ${directionVariation}
 
@@ -128,47 +224,98 @@ DOMAIN & CATEGORY GUIDELINES:
    - MUST describe mouthwatering, hyper-realistic hero food photography! For pizza: an artisan wood-fired pizza fresh out of the stone brick oven on a rustic dark charred wooden board, bubbling melted golden mozzarella cheese stretching smoothly, fresh bright green basil leaves, roasted cherry tomatoes, blistered crust, dusting of flour, warm ambient pizzeria lighting, delicate steam rising. Headline e.g. "Craving Authentic Italian Flavor?", hero_title: "WOOD-FIRED ARTISAN PIZZA" or "HOT & CRISPY SLICES".
 3. "celebration_event" (Corporate anniversary, milestone years e.g. 'completed 3 years', gala party, awards, grand reception):
    - Describe a luxury celebration with 3D metallic golden numerals, crystal champagne flutes, subtle golden confetti glow, elegant festive banquet or rooftop lounge with warm golden lighting. Headline e.g. "Celebrate 3 Years of Innovation", hero_title: "ANNUAL MILESTONE GALA".
-4. "product_tech" (SaaS, software, web development, AI platforms, tech gadgets):
-   - Describe futuristic 3D floating glassmorphic holographic dashboard UI and sleek glowing isometric mockups on a minimalist matte studio pedestal with vibrant cyan and indigo neon accents.
-5. "retail_sale" (Shopping offers, discounts, fashion, seasonal sales):
+4. "product_tech" & "corporate_announcement" (Software, SaaS, AI, tech innovation, company rebranding e.g. 'is now Aurelian International', corporate update, agency, professional solutions):
+   - MUST describe an authentic, photorealistic commercial lifestyle and workplace photograph! E.g. A relatable young professional or software engineer working comfortably at a contemporary minimalist wooden desk with an ultra-wide curved monitor showing code and analytics dashboards, warm natural ambient window sunlight, clean modern office interior with soft depth-of-field background. Cinematic, human, realistic commercial advertising photography (Sony A7 IV, 35mm f/1.8 aesthetic). NEVER cartoon, NEVER CGI, NEVER 3D Pixar, NEVER holographic abstract cubes.
+5. "sports_tournament" & "fitness_sports" (Cricket tournament, corporate cup, football match, sports league, employee championship, athletics):
+   - MUST describe an authentic, photorealistic stadium sporting atmosphere at night under brilliant stadium floodlights! Strictly follow the assigned concept: ${directionVariation}.
+   - NEVER cartoon, NEVER CGI, NEVER 3D Pixar, NEVER video-game characters.
+6. "retail_sale" (Shopping offers, discounts, fashion, seasonal sales):
    - Describe high-impact promotional styling with bold discount badges, luxury shopping boxes, and dynamic editorial lighting.
-6. "fitness_sports" (Gym, training, workout, athletics):
-   - Dynamic athletic photography with dramatic rim lighting and bold blocky typography.
 
 RETURN JSON SCHEMA:
 {
-  "category": "festival | food | celebration_event | product_tech | retail_sale | fitness_sports | general_commercial",
+  "category": "festival | food | celebration_event | product_tech | retail_sale | fitness_sports | sports_tournament | general_commercial",
   "headline": "4-6 words engaging secondary invitation or hook (e.g. 'Celebrate Diwali with Avero Innovations!')",
-  "hero_title": "2-4 words prominent centerpiece title in ALL CAPS (e.g. 'GRAND FESTIVE PARTY', 'WOOD-FIRED ARTISAN PIZZA', '3 YEARS OF INNOVATION')",
-  "badge_text": "2-4 words highlight ribbon tag (e.g. 'ANNUAL FESTIVE GALA', 'JUST ₹299', 'SPECIAL INVITATION')",
+  "hero_title": "2-4 words prominent centerpiece title in ALL CAPS (e.g. 'GRAND FESTIVE PARTY', 'WOOD-FIRED ARTISAN PIZZA', 'AVERO CRICKET TOURNAMENT')",
+  "badge_text": "2-4 words highlight ribbon tag (e.g. '₹1 LAKH PRIZE POOL', 'SPECIAL INVITATION')",
   "price_text": "same as badge_text",
-  "date_text": "exact date/day mentioned in prompt (e.g. 'Sunday, 1st November', 'Thursday, 22nd October') or empty string if not in prompt",
-  "venue_text": "exact venue or hotel mentioned in prompt (e.g. 'Marriott Resort', 'Taj Hotel') or empty string if not in prompt",
+  "date_text": "exact date/day mentioned in prompt (e.g. '25-27 Nov') or empty string if not in prompt",
+  "time_text": "exact timing/hours mentioned in prompt (e.g. '9:00 PM – 1:00 AM') or empty string if not in prompt",
+  "venue_text": "exact venue, ground, hall or hotel mentioned in prompt (e.g. 'Rajpath Club Ground', 'Marriott Resort') or empty string if not in prompt",
+  "prize_text": "exact prize pool amount or tournament prize (e.g. '₹1 Lakh Prize Pool' or 'Prize: 1 Lac') or empty string if not mentioned",
   "features": ["3 distinct highlight labels with icons, max 3 words each"],
-  "cta": "welcoming sign-off or action button, max 6 words (e.g. 'Cordially welcoming all team members and partners.', 'ORDER ONLINE NOW →')",
-  "scene": "vivid, photorealistic scene description matching the exact theme and category as described above",
+  "cta": "welcoming sign-off or action button, max 6 words (e.g. 'Cordially welcoming all team members and partners.')",
+  "scene": "vivid, photorealistic scene description strictly matching the assigned direction variation",
   "layout": "full-bleed-cinematic | modern-editorial | hero-showcase",
   "style_notes": "harmonious color palette and visual atmosphere matching the occasion"
 }
 
 CRITICAL EXTRACTION RULES:
-- IMPORTANT FOR VENUE: If the prompt mentions a venue, hotel, resort, or restaurant (e.g. 'at Marriott Resort', 'at Taj Hotel', 'Downtown Bistro'), extract it into 'venue_text' (e.g. 'Marriott Resort').
-- IMPORTANT FOR DATE: If the prompt mentions a date or day (e.g. 'Sunday, 1st November', '22nd October'), extract it into 'date_text'.
-- IMPORTANT FOR FEATURES: Extract the 3 EXACT highlight features from the prompt whenever present:
-  * For example, if prompt says: "Live music, gourmet buffet, and exciting giveaways", features MUST be: ["Live music", "Gourmet buffet", "Exciting giveaways"]!
-  * If food prompt: ["Wood-Fired Crust", "100% Fresh Mozzarella", "Farm-Fresh Basil"].
-- NEVER output generic website/tech features ('Mobile Responsive', 'Custom Design') for an event, festival, or food ad!
+- IMPORTANT FOR TIME: If the prompt mentions a timing or hours (e.g. 'from 9pm to 1 am', '7:00 PM onwards'), extract it into 'time_text'.
+- IMPORTANT FOR PRIZE POOL: If the prompt mentions a prize pool or cash prize (e.g. 'prizepool is 1lac', '₹50,000 prize'), extract it into 'prize_text' as '₹1 Lakh Prize Pool' or exact amount.
+- IMPORTANT FOR VENUE: If the prompt mentions a venue, hotel, resort, club, or ground (e.g. 'at Rajpath club ground', 'at Marriott Resort'), extract it into 'venue_text' (e.g. 'Rajpath Club Ground').
+- IMPORTANT FOR DATE: If the prompt mentions a date or day (e.g. '25-27 nov', 'Sunday, 1st November'), extract it into 'date_text'.
+- IMPORTANT FOR PRODUCT / TOOL / SERVICE NAMES: If the prompt mentions a specific product name, app, SaaS platform, tool, or agency (e.g. 'Diya AI – Marketing Agency' or 'Diya AI'), you MUST use this exact name in 'headline' or 'hero_title'! NEVER replace a specific product name with generic copy.
+- IMPORTANT FOR FEATURES: Extract 3 distinct highlight features from the prompt.
+- TEXT DEDUPLICATION MANDATE: Every text element must be completely distinct. Do NOT repeat the headline in the badge or cta!
 - Set 'layout' to '${opts.layout || (directionIndex === 0 ? "full-bleed-cinematic" : "modern-editorial")}'.`;
+
+  const wordsPrompt = opts.wordsOnImage ? `\nExact Words to Print on Image (one line per line):\n${opts.wordsOnImage}` : "";
+  const contactPrompt = `\nTicked Contact Details to Include: ${[
+    opts.tickedDetails?.phone && opts.phone ? `Phone: ${opts.phone}` : "",
+    opts.tickedDetails?.email && opts.email ? `Email: ${opts.email}` : "",
+    opts.tickedDetails?.website && opts.website ? `Website: ${opts.website}` : "",
+    opts.tickedDetails?.location && opts.location ? `Location: ${opts.location}` : "",
+  ].filter(Boolean).join(", ") || "None"}`;
+
+  const templateObj = opts.templateId ? getTemplateById(opts.templateId) : undefined;
+  const referencePrompt = (opts.referenceImageUrl || templateObj)
+    ? `\nDESIGN REFERENCE & TEMPLATE STYLING DIRECTIVE:
+Reference Image: ${opts.referenceImageUrl || templateObj?.referenceImageUrl || ""}
+Template Name: ${templateObj?.title || "Selected Design Reference"}
+Template Visual Composition: ${templateObj?.description || "Emulate the composition, framing, lighting atmosphere, visual hierarchy, and color grading of this reference design."}
+Template Aesthetic Atmosphere: ${templateObj?.defaultPrompt || ""}
+CRITICAL DIRECTIVE: You MUST anchor the visual aesthetic to this chosen reference design! Adapt the reference's composition, camera perspective, lighting quality, color grading, and negative space to showcase the user's specific topic ("${opts.prompt}"). The resulting poster must feel like an elevated, crystal-clear commercial advertisement inspired by this reference design.`
+    : "";
 
   const userPrompt = `User Offer Prompt: "${opts.prompt}"
 Business Name: "${brandName}"
 Tagline: "${brandTagline}"
 Brand Colors: "${brandColors}"
 Tone: "${brandTone}"
-Style: "${opts.style || "Bold"}"`;
+Style: "${opts.style || "Bold"}"
+Target Format & Aspect Ratio: "${format}" (${formatInstruction})${namedProduct ? `\nPRIMARY PROMOTED PRODUCT / OFFER: "${namedProduct}". You MUST feature "${namedProduct}" prominently on the flyer!` : ""}${wordsPrompt}${contactPrompt}${referencePrompt}`;
 
   if (apiKey) {
     try {
+      const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+        { type: "text", text: userPrompt },
+      ];
+
+      const refUrlForVision = opts.referenceImageUrl || templateObj?.referenceImageUrl;
+      if (refUrlForVision) {
+        try {
+          let imageUrlForVision = refUrlForVision;
+          if (refUrlForVision.startsWith("/")) {
+            const localPath = path.resolve(process.cwd(), "public", refUrlForVision.replace(/^\/+/, ""));
+            if (fs.existsSync(localPath)) {
+              const buf = fs.readFileSync(localPath);
+              imageUrlForVision = `data:image/png;base64,${buf.toString("base64")}`;
+            }
+          } else if (refUrlForVision.startsWith("http")) {
+            const fetchRef = await fetch(refUrlForVision, { signal: AbortSignal.timeout(8000) });
+            if (fetchRef.ok) {
+              const buf = Buffer.from(await fetchRef.arrayBuffer());
+              imageUrlForVision = `data:image/png;base64,${buf.toString("base64")}`;
+            }
+          }
+          userContent.push({
+            type: "image_url",
+            image_url: { url: imageUrlForVision },
+          });
+        } catch {}
+      }
+
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -179,7 +326,7 @@ Style: "${opts.style || "Bold"}"`;
           model,
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
+            { role: "user", content: userContent },
           ],
           response_format: { type: "json_object" },
           temperature: 0.6,
@@ -193,7 +340,9 @@ Style: "${opts.style || "Bold"}"`;
         if (content) {
           const parsed = JSON.parse(content);
           const rawDate = typeof parsed.date_text === "string" ? parsed.date_text.trim() : "";
+          const rawTime = typeof parsed.time_text === "string" ? parsed.time_text.trim() : "";
           const rawVenue = typeof parsed.venue_text === "string" ? parsed.venue_text.trim() : "";
+          const rawPrize = typeof parsed.prize_text === "string" ? parsed.prize_text.trim() : "";
           const rawBadge = typeof parsed.badge_text === "string"
             ? parsed.badge_text.trim()
             : typeof parsed.price_text === "string"
@@ -201,19 +350,55 @@ Style: "${opts.style || "Bold"}"`;
             : "";
           const rawHeroTitle = typeof parsed.hero_title === "string" ? parsed.hero_title.trim() : "";
 
+          let finalHeadline = structured.headline || String(parsed.headline || (namedProduct && !isMetaPhrase(namedProduct) ? namedProduct : "Celebrate With Us")).trim();
+          let finalHeroTitle = structured.supportingText || rawHeroTitle || (namedProduct && !isMetaPhrase(namedProduct) ? namedProduct : "SPECIAL EVENT");
+          let finalCta = structured.cta || String(parsed.cta || "Cordially welcoming all team members and partners.").trim();
+
+          if (isMetaPhrase(finalHeroTitle)) {
+            finalHeroTitle = structured.supportingText || (namedProduct && !isMetaPhrase(namedProduct) ? namedProduct : "");
+          }
+          if (isMetaPhrase(finalHeadline)) {
+            finalHeadline = structured.headline || (namedProduct && !isMetaPhrase(namedProduct) ? namedProduct : "Exclusive Offer");
+          }
+
+          if (namedProduct && !isMetaPhrase(namedProduct) && !structured.headline) {
+            if (!finalHeadline.toLowerCase().includes(namedProduct.toLowerCase()) && !finalHeroTitle.toLowerCase().includes(namedProduct.toLowerCase())) {
+              finalHeroTitle = namedProduct;
+              finalHeadline = namedProduct;
+            }
+          }
+
+          if (opts.wordsOnImage && opts.wordsOnImage.trim()) {
+            const lines = opts.wordsOnImage.trim().split("\n").map((l) => l.trim()).filter(Boolean);
+            if (lines[0]) finalHeadline = lines[0];
+            if (lines[1]) finalHeroTitle = lines[1];
+            if (lines[2]) finalCta = lines[2];
+          }
+
+          // Strict text deduplication: if cta or badge matches headline, substitute with prize or event badge
+          if (finalCta.toLowerCase() === finalHeadline.toLowerCase()) {
+            finalCta = rawPrize ? `🏆 ${rawPrize}` : "⚡ Welcome Team";
+          }
+          let badgeText = structured.offer || rawBadge;
+          if (!badgeText || badgeText.toLowerCase() === finalHeadline.toLowerCase()) {
+            badgeText = structured.offer || (rawPrize ? `🏆 ${rawPrize}` : (rawTime ? `⏰ ${rawTime}` : "SPECIAL EVENT"));
+          }
+
           return {
             category: parsed.category,
-            headline: String(parsed.headline || "Celebrate With Us").trim(),
-            hero_title: rawHeroTitle || "GRAND FESTIVE PARTY",
-            badge_text: rawBadge || "SPECIAL INVITATION",
-            price_text: rawBadge || "SPECIAL INVITATION",
+            headline: finalHeadline,
+            hero_title: finalHeroTitle,
+            badge_text: badgeText,
+            price_text: badgeText,
             date_text: rawDate,
+            time_text: rawTime,
             venue_text: rawVenue,
+            prize_text: rawPrize,
             features: Array.isArray(parsed.features) && parsed.features.length >= 3
               ? parsed.features.slice(0, 3).map((f: any) => String(f).trim())
-              : [rawVenue || "Marriott Resort", "Festive Buffet", "Live Music"],
-            cta: String(parsed.cta || "Cordially welcoming all team members and partners.").trim(),
-            scene: String(parsed.scene || "Deep royal navy and gold festive night scene with hanging brass lanterns and glowing diyas on floral rangoli").trim(),
+              : [rawVenue || "Rajpath Club Ground", rawTime || "9 PM - 1 AM", rawPrize || "₹1 Lakh Prize Pool"],
+            cta: finalCta,
+            scene: String(parsed.scene || "Modern professional stadium setting with authentic lighting and clean depth of field").trim(),
             layout: (["full-bleed-cinematic", "modern-editorial", "hero-showcase", "left-text-right-visual", "centered-hero", "bottom-banner"].includes(parsed.layout)
               ? parsed.layout
               : (opts.layout || "full-bleed-cinematic")) as any,
@@ -231,21 +416,86 @@ Style: "${opts.style || "Bold"}"`;
   const isFestival = /\b(diwali|deepavali|festiv|eid|navratri|christmas|new year|holi|thanksgiving)\b/i.test(lowerPrompt);
   const isFood = /\b(pizza|burger|food|cafe|bistro|restaurant|coffee|bakery|dining|buffet|tacos|pasta|barbecue|bbq|sushi)\b/i.test(lowerPrompt);
   const isCelebration = /\b(celebrat|anniversary|milestone|party|gala|years?|birthday|ceremony|opening|launch|welcome|invited)\b/i.test(lowerPrompt);
+  const isSportsOrCricket = /\b(cricket|tournament|match|ground|pitch|sports|cup|league|team t-shirts|prizepool)\b/i.test(lowerPrompt);
 
   const dayMatch = opts.prompt.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday|weekend|today|tomorrow)\b/i);
-  const dateMatch = opts.prompt.match(/\b(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?)\b/i);
+  const dateMatch = opts.prompt.match(/\b(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?|\d{1,2}\s*-\s*\d{1,2}\s*(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))\b/i);
   const fallbackDate = (dayMatch && dateMatch)
     ? `${dayMatch[0].charAt(0).toUpperCase() + dayMatch[0].slice(1).toLowerCase()}, ${dateMatch[0]}`
-    : (dayMatch ? `THIS ${dayMatch[0].toUpperCase()}` : (dateMatch ? dateMatch[0] : ""));
+    : (dateMatch ? dateMatch[0] : (dayMatch ? `THIS ${dayMatch[0].toUpperCase()}` : ""));
 
-  const venueMatch = opts.prompt.match(/\b(?:at|in|venue:?)\s+([A-Za-z0-9\s&'-]+(?:\bhotel|\bresort|\bhall|\bcenter|\bcentre|\bpalace|\bclub|\barena|\bgarden|\binn|\bbistro|\bcafe|\brestaurant))\b/i)
-    || opts.prompt.match(/\b(?:marriott resort|marriott|taj hotel|hyatt|hilton|radisson|leela|oberoi|itc|novotel|westin)\b/i);
+  const timeMatch = opts.prompt.match(/\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*(?:to|-|till)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i)
+    || opts.prompt.match(/\b(?:timing|time|from)\s*:?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:to|-|till)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i);
+  const fallbackTime = timeMatch?.[1] ? timeMatch[1].trim() : "";
+
+  const prizeMatch = opts.prompt.match(/\b(?:prizepool|prize\s*pool|prize|cash\s*prize)\s*(?:is|of|:)?\s*([₹$€£]?\s*\d+\s*(?:lac|lakh|crore|k|m)?|\d+(?:,\d+)*(?:\s*(?:lac|lakh|crore))?)\b/i);
+  let fallbackPrize = "";
+  if (prizeMatch && prizeMatch[1]) {
+    const rawVal = prizeMatch[1].trim();
+    fallbackPrize = /lac|lakh/i.test(rawVal)
+      ? `₹${rawVal.replace(/₹/g, "").trim().toUpperCase()} Prize Pool`
+      : `₹${rawVal} Prize Pool`;
+  }
+
+  const venueMatch = opts.prompt.match(/\b(?:at|in|venue:?)\s+([A-Za-z0-9\s&'-]+(?:\bhotel|\bresort|\bhall|\bcenter|\bcentre|\bpalace|\bclub\s*ground|\bclub|\bground|\barena|\bgarden|\binn|\bbistro|\bcafe|\brestaurant))\b/i)
+    || opts.prompt.match(/\b(?:rajpath club ground|rajpath club|marriott resort|marriott|taj hotel|hyatt|hilton|radisson|leela|oberoi|itc|novotel|westin)\b/i);
   const fallbackVenue = venueMatch ? (venueMatch[1] || venueMatch[0]).trim() : "";
 
   // Extract features directly from prompt if possible
   const liveMusicMatch = /live music/i.test(opts.prompt);
   const buffetMatch = /gourmet buffet|buffet|dinner|food/i.test(opts.prompt);
   const giveawayMatch = /giveaways?|gifts?|prizes?/i.test(opts.prompt);
+
+  if (structured.headline) {
+    const isRetail = /sale|black friday|discount|offer|deal|cyber monday/i.test(opts.prompt);
+    return {
+      category: isRetail ? "retail_sale" : (isCelebration ? "celebration_event" : "general_commercial"),
+      headline: structured.headline,
+      hero_title: structured.supportingText || (namedProduct && !isMetaPhrase(namedProduct) ? namedProduct : "SPECIAL OFFER"),
+      badge_text: structured.offer || "SPECIAL OFFER",
+      price_text: structured.offer || "SPECIAL OFFER",
+      date_text: structured.date || fallbackDate,
+      time_text: structured.time || fallbackTime,
+      venue_text: structured.venue || fallbackVenue,
+      prize_text: structured.prize || fallbackPrize,
+      features: structured.offer ? [structured.offer, "All Subscriptions", "Limited Time Deal"] : ["Custom Solution", "Mobile Responsive", "Growth Ready"],
+      cta: structured.cta || "GRAB YOUR DEAL NOW →",
+      scene: isRetail
+        ? "Dramatic, high-end Black Friday sale atmosphere with polished black and gold luxury aesthetics, glowing discount pedestals, modern AI elements, and sleek depth of field."
+        : "Contemporary minimalist professional workplace with clean ambient lighting and sharp displays",
+      layout: opts.layout || "full-bleed-cinematic",
+      style_notes: isRetail ? "Black and gold luxury theme, sleek glowing amber accents, professional commercial lighting" : `${brandColors}, clean commercial aesthetic`,
+    };
+  }
+
+  if (isSportsOrCricket) {
+    const sportsScenes = [
+      "Dynamic action shot on the cricket pitch under brilliant stadium floodlights. A batsman playing an aggressive shot with motion blur and grass kicking up, authentic night sports photography (Sony A7 IV, 35mm f/1.8 aesthetic).",
+      "Prestigious golden championship trophy cup on a pedestal bathed in stadium spotlights, with spectacular night fireworks bursting in the background sky above the stadium arena.",
+      "Spirited, cheerful team of corporate colleagues wearing matching team t-shirts in a celebratory team huddle on the Rajpath Club field, looking enthusiastic under stadium floodlights.",
+      "Modern high-contrast sports editorial poster with sleek stadium floodlight silhouette against a twilight gradient sky, prominent tournament info cards.",
+    ];
+    return {
+      category: "sports_tournament",
+      headline: opts.wordsOnImage ? opts.wordsOnImage.trim().split("\n")[0]! : "Annual Cricket Tournament",
+      hero_title: (brandName || "Avero Innovations").toUpperCase() + " CRICKET CUP",
+      badge_text: fallbackPrize ? `🏆 ${fallbackPrize}` : "CHAMPIONSHIP MATCH",
+      price_text: fallbackPrize || "",
+      prize_text: fallbackPrize || "₹1 Lakh Prize Pool",
+      date_text: fallbackDate || "25–27 November",
+      time_text: fallbackTime || "9:00 PM – 1:00 AM",
+      venue_text: fallbackVenue || "Rajpath Club Ground",
+      features: [
+        fallbackVenue || "Rajpath Club Ground",
+        fallbackTime || "9:00 PM – 1:00 AM",
+        fallbackPrize || "₹1 Lakh Prize Pool",
+      ],
+      cta: "⚡ Cordially welcoming all team members.",
+      scene: sportsScenes[directionIndex % sportsScenes.length]!,
+      layout: opts.layout || "full-bleed-cinematic",
+      style_notes: `${brandColors}, energetic night stadium floodlight radiance`,
+    };
+  }
 
   if (isFestival) {
     return {
@@ -287,22 +537,98 @@ Style: "${opts.style || "Bold"}"`;
 
   return {
     category: isCelebration ? "celebration_event" : "general_commercial",
-    headline: isCelebration ? "Celebrate 3 Years of Innovation" : "Launch Your Dream Website",
-    hero_title: isCelebration ? "ANNUAL MILESTONE GALA" : "NEXT-GEN DIGITAL SUITE",
-    badge_text: isCelebration ? "3RD ANNIVERSARY" : "EXCLUSIVE OFFER",
-    price_text: isCelebration ? "3RD ANNIVERSARY" : "EXCLUSIVE OFFER",
+    headline: isCelebration ? "Celebrate 3 Years of Innovation" : (namedProduct ? `Introducing ${namedProduct}` : "Launch Your Dream Website"),
+    hero_title: isCelebration ? "ANNUAL MILESTONE GALA" : (namedProduct ? namedProduct.toUpperCase() : "NEXT-GEN DIGITAL SUITE"),
+    badge_text: isCelebration ? "3RD ANNIVERSARY" : (namedProduct ? "FEATURED PRODUCT" : "EXCLUSIVE OFFER"),
+    price_text: isCelebration ? "3RD ANNIVERSARY" : (namedProduct ? "FEATURED PRODUCT" : "EXCLUSIVE OFFER"),
     date_text: fallbackDate,
     venue_text: fallbackVenue,
     features: isCelebration
       ? ["3-Year Milestone", fallbackVenue || "Marriott Resort", "Cordially Invited"]
-      : ["Custom Design", "Mobile Responsive", "Built to Grow"],
-    cta: isCelebration ? "RSVP NOW →" : "LET'S BUILD YOUR WEBSITE →",
+      : (namedProduct ? [namedProduct, "All-in-One Platform", "Automate Growth"] : ["Custom Design", "Mobile Responsive", "Built to Grow"]),
+    cta: isCelebration ? "RSVP NOW →" : (namedProduct ? `DISCOVER ${namedProduct.toUpperCase()} →` : "LET'S BUILD YOUR WEBSITE →"),
     scene: isCelebration
       ? "Luxury hotel gala ballroom with ambient golden architectural lighting, crystal champagne flutes, modern luxury decor, and well-dressed business professionals celebrating"
-      : "3D laptop and smartphone mockups showing a modern responsive website on a clean minimalist desk",
+      : (namedProduct ? `Modern clean tech commercial workplace showcasing ${namedProduct} on sharp high-resolution displays in a sleek contemporary office environment` : "3D laptop and smartphone mockups showing a modern responsive website on a clean minimalist desk"),
     layout: opts.layout || "full-bleed-cinematic",
     style_notes: `${brandColors}, clean commercial aesthetic`,
   };
+}
+
+// ─── Logo Compositing Helper (Sharp) ──────────────────────────────────────────
+
+export async function compositeLogoOnFlyer(
+  flyerBuffer: Buffer,
+  logoUrl: string,
+  format: "Square" | "Portrait 4:5" | "Story" = "Portrait 4:5"
+): Promise<Buffer> {
+  const { default: sharp } = await import("sharp");
+
+  let logoBuffer: Buffer;
+  if (logoUrl.startsWith("data:")) {
+    const base64Data = logoUrl.replace(/^data:image\/\w+;base64,/, "");
+    logoBuffer = Buffer.from(base64Data, "base64");
+  } else if (logoUrl.startsWith("/")) {
+    const localPath = path.resolve(process.cwd(), "public", logoUrl.replace(/^\/+/, ""));
+    if (fs.existsSync(localPath)) {
+      logoBuffer = fs.readFileSync(localPath);
+    } else {
+      throw new Error(`Local logo file not found: ${localPath}`);
+    }
+  } else {
+    const res = await fetch(logoUrl, { signal: AbortSignal.timeout(12_000) });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch logo image (${res.status})`);
+    }
+    logoBuffer = Buffer.from(await res.arrayBuffer());
+  }
+
+  // Inspect flyer dimensions
+  const flyerMeta = await sharp(flyerBuffer).metadata();
+  const flyerW = flyerMeta.width || (format === "Square" ? 1024 : format === "Story" ? 1024 : 1024);
+
+  // Process logo: check corner pixels and remove solid black or white backgrounds
+  const logoSharp = sharp(logoBuffer);
+  const { data, info } = await logoSharp.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+
+  const cornerR = data[0] ?? 0;
+  const cornerG = data[1] ?? 0;
+  const cornerB = data[2] ?? 0;
+  const isBlackBg = cornerR < 25 && cornerG < 25 && cornerB < 25;
+  const isWhiteBg = cornerR > 230 && cornerG > 230 && cornerB > 230;
+
+  if (isBlackBg) {
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i]! < 25 && data[i + 1]! < 25 && data[i + 2]! < 25) {
+        data[i + 3] = 0; // Transparent
+      }
+    }
+  } else if (isWhiteBg) {
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i]! > 230 && data[i + 1]! > 230 && data[i + 2]! > 230) {
+        data[i + 3] = 0; // Transparent
+      }
+    }
+  }
+
+  const maxW = format === "Story" ? 320 : 280;
+  const maxH = format === "Story" ? 95 : 80;
+
+  const trimmedLogo = await sharp(data, {
+    raw: { width: info.width, height: info.height, channels: 4 },
+  })
+    .trim()
+    .resize({ width: maxW, height: maxH, fit: "inside" })
+    .png()
+    .toBuffer({ resolveWithObject: true });
+
+  const left = Math.max(0, Math.round((flyerW - trimmedLogo.info.width) / 2));
+  const top = format === "Story" ? 110 : (format === "Square" ? 50 : 60);
+
+  return await sharp(flyerBuffer)
+    .composite([{ input: trimmedLogo.data, top, left }])
+    .png()
+    .toBuffer();
 }
 
 // ─── Step 2: Single-Shot Finished Flyer Generation (OpenAI) ──────────────────
@@ -314,6 +640,22 @@ export async function generateFinishedFlyer(opts: {
   logoUrl?: string | null | undefined;
   colors?: string[] | undefined;
   format?: "Square" | "Portrait 4:5" | "Story" | undefined;
+  wordsOnImage?: string | undefined;
+  phone?: string | undefined;
+  email?: string | undefined;
+  website?: string | undefined;
+  location?: string | undefined;
+  tickedDetails?: {
+    logo?: boolean;
+    colors?: boolean;
+    phone?: boolean;
+    location?: boolean;
+    website?: boolean;
+    email?: boolean;
+  } | undefined;
+  size?: string | undefined;
+  referenceImageUrl?: string | null | undefined;
+  templateId?: string | null | undefined;
 }): Promise<{ url: string; model: string; size: string; quality: string }> {
   const apiKey = getOpenAiApiKey();
   if (!apiKey) {
@@ -327,22 +669,35 @@ export async function generateFinishedFlyer(opts: {
     : rawModel;
 
   const rawQuality = process.env["OPENAI_IMAGE_QUALITY"]?.trim()?.toLowerCase();
-  // Allow "medium" or "low"; never "high" or "auto"
-  const quality = rawQuality === "low" ? "low" : "medium";
+  const quality = (rawQuality === "low" || rawQuality === "medium") && !opts.size?.includes("2K")
+    ? rawQuality
+    : "high";
 
-  // Map format to native OpenAI image dimensions
+  // Map format & requested size to exact OpenAI image dimensions
   const format = opts.format || "Portrait 4:5";
-  const size = format === "Square"
+  let size = format === "Square"
     ? "1024x1024"
     : format === "Story"
     ? "1024x1792"
     : "1024x1280";
 
+  if (opts.size) {
+    const normalized = opts.size.replace(/[*×]/g, "x").trim();
+    const dimMatch = normalized.match(/(\d{3,4})x(\d{3,4})/i);
+    if (dimMatch) {
+      const w = parseInt(dimMatch[1]!, 10);
+      const h = parseInt(dimMatch[2]!, 10);
+      if (w === h) size = "1024x1024";
+      else if (h > w * 1.5) size = "1024x1792";
+      else size = "1024x1280";
+    }
+  }
+
   const aspectRatioLabel = format === "Square"
-    ? "aspect ratio 1:1 square, 1024x1024"
+    ? `aspect ratio 1:1 square, ${size}`
     : format === "Story"
-    ? "aspect ratio 9:16 vertical story, 1024x1792"
-    : "aspect ratio 4:5 portrait, 1024x1280";
+    ? `aspect ratio 9:16 vertical story, ${size}`
+    : `aspect ratio 4:5 portrait, ${size}`;
 
   const rawFeatures = Array.isArray(opts.brief.features) ? opts.brief.features : [];
   const dateNorm = (opts.brief.date_text || "").toLowerCase();
@@ -370,66 +725,154 @@ export async function generateFinishedFlyer(opts: {
 
   const heroTitle = opts.brief.hero_title || opts.brief.badge_text || "GRAND CELEBRATION";
   const dateStr = opts.brief.date_text?.trim() ? `'${opts.brief.date_text.trim()}'` : "";
+  const timeStr = opts.brief.time_text?.trim() ? `'${opts.brief.time_text.trim()}'` : "";
   const venueStr = opts.brief.venue_text?.trim() ? `'${opts.brief.venue_text.trim()}'` : "";
+  const prizeStr = opts.brief.prize_text?.trim() ? `'${opts.brief.prize_text.trim()}'` : "";
 
-  // Date and venue instruction (single framed bar, do not repeat)
-  let eventDetailsInstruction = "";
-  if (dateStr && venueStr) {
-    eventDetailsInstruction = `Framed event details bar with calendar icon for date ${dateStr} and location pin icon for venue ${venueStr}. Do not repeat date or venue details elsewhere. `;
-  } else if (dateStr) {
-    eventDetailsInstruction = `Prominent date ribbon badge: ${dateStr}. `;
-  } else if (venueStr) {
-    eventDetailsInstruction = `Prominent venue location badge: ${venueStr}. `;
-  }
+  // Date, timing and venue instruction (single framed bar, do not repeat)
+  const eventParts: string[] = [];
+  if (dateStr) eventParts.push(`calendar icon for date ${dateStr}`);
+  if (timeStr) eventParts.push(`clock icon for time ${timeStr}`);
+  if (venueStr) eventParts.push(`location pin icon for venue ${venueStr}`);
+
+  const eventDetailsInstruction = eventParts.length > 0
+    ? `Framed event details bar: ${eventParts.join(", ")}. Do not repeat date, time, or venue details elsewhere. `
+    : "";
+
+  const prizePoolInstruction = prizeStr
+    ? `Prominent tournament championship prize badge or ribbon: '🏆 ${opts.brief.prize_text?.trim()}'. `
+    : "";
 
   // Feature pills with icons
   const featureInstruction = `Feature row with three distinct icon badges: '${f1}', '${f2}', '${f3}'. `;
 
-  // Top header instruction: Tell model to place supplied logo unchanged
+  // Top header instruction: Reserve top negative space and strictly prohibit drawing hallucinated brand logos/emblems
   const topLogoInstruction = opts.logoUrl
-    ? `Top: the supplied logo, unchanged, with the tagline '${opts.tagline || ""}'`
-    : `Top: the brand name '${opts.businessName.toUpperCase()}', with the tagline '${opts.tagline || ""}'`;
+    ? `Top Header & Logo Safe Area: Keep the top 15% of the poster as clean, spacious negative space with seamless lighting matching the environment. CRITICAL BRAND LOGO DIRECTIVE: Absolutely DO NOT paint, invent, draw, or render any company emblem, logo icon, crest, or fake brand symbol at the top or in the header. Do NOT write fake brand names or watermarks like GodiyaAI or invented logos. Leave the top header empty, clean, and uncluttered so the official brand logo can be cleanly composited there.`
+    : `Top Header: Brand name '${opts.businessName.toUpperCase()}' cleanly styled with tagline '${opts.tagline || ""}'. The top header must remain clean, bright, and evenly illuminated without any black vignette or dark smoke.`;
+
+  // Bottom contact strip instruction
+  const contactParts: string[] = [];
+  if (opts.tickedDetails?.phone && opts.phone) contactParts.push(`phone icon with number '${opts.phone}'`);
+  if (opts.tickedDetails?.email && opts.email) contactParts.push(`email icon with '${opts.email}'`);
+  if (opts.tickedDetails?.website && opts.website) contactParts.push(`website icon with '${opts.website}'`);
+  if (opts.tickedDetails?.location && opts.location) contactParts.push(`location pin with '${opts.location}'`);
+
+  const contactBarInstruction = contactParts.length > 0
+    ? `At the bottom: sleek, frosted dark translucent contact pill with clean icons: ${contactParts.join(" and ")}. `
+    : "";
+
+  const isSaleOrPromo =
+    opts.brief.category === "retail_sale" ||
+    /\b(sale|discount|offer|black friday|cyber monday|deal|clearance)\b/i.test(opts.brief.headline);
+
+  const isTechOrCorporate =
+    opts.brief.category === "product_tech" ||
+    (opts.brief.category as string) === "corporate_announcement" ||
+    opts.brief.category === "sports_tournament" ||
+    isSaleOrPromo ||
+    Boolean(opts.wordsOnImage);
+
+  // Distinct pill badge that NEVER duplicates headline
+  let badgePill = opts.brief.prize_text?.trim()
+    ? `🏆 ${opts.brief.prize_text.trim()}`
+    : (opts.brief.badge_text && opts.brief.badge_text.toLowerCase() !== opts.brief.headline.toLowerCase()
+      ? opts.brief.badge_text
+      : (opts.brief.time_text ? `⏰ ${opts.brief.time_text}` : "⚡ Special Event"));
+
+  if (badgePill.toLowerCase() === opts.brief.headline.toLowerCase()) {
+    badgePill = "⚡ Special Event";
+  }
+
+  // Filter out any meta phrases like "promotional poster" from hero_title
+  const cleanHeroTitle = (opts.brief.hero_title && !isMetaPhrase(opts.brief.hero_title))
+    ? opts.brief.hero_title
+    : (opts.tagline || "");
 
   // Center display typography instruction
-  const titleInstruction = `Secondary invitation headline: '${opts.brief.headline}'. Centerpiece main title in huge, prominent 3D embossed metallic lettering: '${heroTitle}'. `;
+  const titleInstruction = isSaleOrPromo
+    ? `Main Sale Headline in bold prominent typography: '${opts.brief.headline}'. Centerpiece Big Offer badge or discount banner: '${opts.brief.badge_text || opts.brief.price_text}'. ${cleanHeroTitle ? `Supporting text: '${cleanHeroTitle}'. ` : ""}${opts.brief.cta ? `Call to action button: '${opts.brief.cta}'. ` : ""}`
+    : isTechOrCorporate
+    ? `Upper third typography: Bold, modern, clean sans-serif headline: '${opts.brief.headline}'. ${cleanHeroTitle ? `Supporting clean subline: '${cleanHeroTitle}'. ` : ""}Action pill badge button: '${badgePill}'. `
+    : `Secondary invitation headline: '${opts.brief.headline}'. Centerpiece main title in huge, prominent lettering: '${heroTitle}'. `;
 
-  // Footer / CTA instruction
-  const footerInstruction = `Bottom invitation sign-off or action button: '${opts.brief.cta}'. `;
+  // Footer / CTA instruction (omit duplicate bottom CTA if contact bar is present)
+  const footerInstruction = contactParts.length > 0
+    ? ""
+    : (opts.brief.cta && opts.brief.cta.toLowerCase() !== opts.brief.headline.toLowerCase()
+      ? `Bottom invitation sign-off or action button: '${opts.brief.cta}'. `
+      : "");
 
   // Scene & aesthetics instruction
-  const sceneInstruction = `Atmospheric full-bleed visual backdrop: ${opts.brief.scene}. Lighting and mood: ${opts.brief.style_notes}. `;
+  const sceneInstruction = `Atmospheric visual backdrop: ${opts.brief.scene}. Lighting and mood: ${opts.brief.style_notes}. `;
+  const templateObj = opts.templateId ? getTemplateById(opts.templateId) : undefined;
+  const referenceDesc = templateObj ? `${templateObj.title} (${templateObj.description})` : "the selected reference design";
+  const referenceInstruction = (opts.referenceImageUrl || templateObj)
+    ? `Reference Photo Style Guidance: Strictly emulate the visual composition, framing, color grading, lighting atmosphere, elegant negative space, and premium aesthetic of ${referenceDesc}${opts.referenceImageUrl ? ` (${opts.referenceImageUrl})` : ""}. Craft an elevated commercial poster that faithfully adapts this reference design style for '${opts.brief.hero_title || opts.businessName}'. `
+    : "";
 
-  const prompt = `Design a complete, professional, ready-to-post Instagram commercial advertisement poster (${aspectRatioLabel}). Full-bleed immersive composition, cinematic commercial photography and lighting.
+  const prompt = `Design a complete, professional, ready-to-post commercial advertisement poster (${aspectRatioLabel}).
+Composition & Canvas: Built strictly for ${aspectRatioLabel}. Ensure framing, margins, text padding, and focal elements are beautifully composed specifically for this ${format} aspect ratio. Full-bleed immersive composition, authentic commercial photography and natural lighting.
+CRITICAL FULL-BLEED & ZERO-LETTERBOX MANDATE: The background and environment MUST extend 100% seamlessly to all four corners of the canvas (${size}). Absolutely NO black borders, NO black letterboxing, NO pillarboxing, NO curved arch/dome cutouts, and NO dark peripheral vignetting. Every edge of the image must be bright, clean, and fully rendered with the scene environment.
+Lighting & Background Cleanliness: Seamless, bright natural lighting across the entire canvas. Absolutely NO black vignette, NO dark smoke, NO dark top shadows, and NO dirty black gradient at the top edge. The top of the room and header must remain bright, clean, and naturally illuminated.
+Visual Realism & Authenticity: High-end commercial editorial photography (Sony A7 IV, 35mm f/1.8 aesthetic). Realistic environment matching the prompt with authentic depth of field. Absolutely NO cartoonish, 3D Pixar, CGI animated, or cheap clip-art styles.
 ${topLogoInstruction}.
 ${titleInstruction}
+${prizePoolInstruction}
 ${eventDetailsInstruction}
-${featureInstruction}
+${isTechOrCorporate ? "" : featureInstruction}
+${contactBarInstruction}
 ${footerInstruction}
 ${sceneInstruction}
-Render ONLY the quoted text exactly as written, with 100% accurate spelling. Do not invent any extra words, numbers, watermarks, or gibberish. Ensure high visual contrast, elegant typography, and generous margins so all details are crisp and legible.`.trim();
+${referenceInstruction}
+CRITICAL TEXT INTEGRITY: Render ONLY the quoted text exactly as written. Ensure 100% accurate spelling. Every text element must appear AT MOST ONCE on the poster. Absolutely NEVER duplicate the headline text into any badge, capsule pill, or button. Do not invent extra words or watermarks. Ensure high visual contrast, elegant typography, and generous margins so all details are crisp and legible.`.trim();
 
   log.ai("OpenAI", `Generating finished commercial flyer with ${model}`, { model, size, quality, format, category: opts.brief.category, hasLogo: Boolean(opts.logoUrl) });
 
-  let rawBuffer: Buffer | null = null;
+  const refUrl = opts.referenceImageUrl || templateObj?.referenceImageUrl;
+  let usedEditsApi = false;
+  let buffer: Buffer | null = null;
+  let previewUrl: string | null = null;
 
-  // 1. If brand logo exists, call the image EDIT endpoint with the real logo as reference image
-  if (opts.logoUrl) {
-    const candidateModels = [model, "gpt-image-2.5-sunburst", "gpt-image-2"];
-    for (const editModel of candidateModels) {
-      try {
-        const logoRes = await fetch(opts.logoUrl);
-        if (!logoRes.ok) break;
+  const [wStr, hStr] = size.split("x");
+  const targetW = parseInt(wStr || "1024", 10);
+  const targetH = parseInt(hStr || "1280", 10);
 
-        const logoArrayBuffer = await logoRes.arrayBuffer();
-        const logoBlob = new Blob([logoArrayBuffer], { type: "image/png" });
+  // If a template reference image is provided, condition generation using images/edits
+  if (refUrl) {
+    try {
+      let refBuffer: Buffer | null = null;
+      if (refUrl.startsWith("data:")) {
+        const base64Data = refUrl.replace(/^data:image\/\w+;base64,/, "");
+        refBuffer = Buffer.from(base64Data, "base64");
+      } else if (refUrl.startsWith("/")) {
+        const localPath = path.resolve(process.cwd(), "public", refUrl.replace(/^\/+/, ""));
+        if (fs.existsSync(localPath)) {
+          refBuffer = fs.readFileSync(localPath);
+        }
+      } else {
+        const fetchRef = await fetch(refUrl, { signal: AbortSignal.timeout(15_000) });
+        if (fetchRef.ok) {
+          refBuffer = Buffer.from(await fetchRef.arrayBuffer());
+        }
+      }
+
+      if (refBuffer) {
+        const { default: sharp } = await import("sharp");
+        // Pre-fit and crop the reference image to exact target canvas dimensions to prevent ANY black letterbox outpainting
+        const fittedRefBuffer = await sharp(refBuffer)
+          .resize(targetW, targetH, { fit: "cover", position: "center" })
+          .png()
+          .toBuffer();
 
         const formData = new FormData();
-        formData.append("image", logoBlob, "brand-logo.png");
-        formData.append("model", editModel);
+        formData.append("image", new Blob([fittedRefBuffer], { type: "image/png" }), "template-ref.png");
+        formData.append("model", model);
         formData.append("prompt", prompt);
         formData.append("size", size);
         formData.append("quality", quality);
 
+        log.ai("OpenAI", `Conditioning flyer generation with template reference image via images/edits (${model})`, { size, quality, targetW, targetH });
         const editRes = await fetch("https://api.openai.com/v1/images/edits", {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}` },
@@ -438,31 +881,32 @@ Render ONLY the quoted text exactly as written, with 100% accurate spelling. Do 
         });
 
         if (editRes.ok) {
-          const data = (await editRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
-          const item = data.data?.[0];
-          if (item?.b64_json) {
-            rawBuffer = Buffer.from(item.b64_json, "base64");
-            log.ai("OpenAI", `Finished flyer generated successfully via images/edits with ${editModel}`);
-            break;
-          } else if (item?.url) {
-            const imgRes = await fetch(item.url);
-            if (imgRes.ok) {
-              rawBuffer = Buffer.from(await imgRes.arrayBuffer());
-              break;
+          const editData = (await editRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+          const editItem = editData.data?.[0];
+          if (editItem?.b64_json) {
+            buffer = Buffer.from(editItem.b64_json, "base64");
+            usedEditsApi = true;
+          } else if (editItem?.url) {
+            previewUrl = editItem.url;
+            const fetchRes = await fetch(editItem.url, { signal: AbortSignal.timeout(30_000) });
+            if (fetchRes.ok) {
+              buffer = Buffer.from(await fetchRes.arrayBuffer());
+              usedEditsApi = true;
             }
           }
         } else {
           const errText = await editRes.text();
-          log.ai("OpenAI", `images/edits call with ${editModel} failed (${editRes.status}): ${errText.slice(0, 150)}`);
+          log.ai("OpenAI", `images/edits non-200 (${editRes.status}): ${errText.slice(0, 150)}. Falling back to direct generation.`);
         }
-      } catch (err) {
-        log.ai("OpenAI", `images/edits error with ${editModel}: ${err instanceof Error ? err.message : String(err)}`);
       }
+    } catch (refErr) {
+      log.ai("OpenAI", `Template image conditioning error: ${refErr instanceof Error ? refErr.message : String(refErr)}. Falling back to direct generation.`);
     }
   }
 
-  // 2. If no logo or if edits failed, use images/generations endpoint
-  if (!rawBuffer) {
+  // Fallback to direct edge-to-edge generation via OpenAI images/generations API if edits was not used or did not produce an image
+  if (!usedEditsApi || !buffer) {
+    const startTime = Date.now();
     const genRes = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: {
@@ -479,33 +923,75 @@ Render ONLY the quoted text exactly as written, with 100% accurate spelling. Do 
       signal: AbortSignal.timeout(60_000),
     });
 
+    let errText: string | null = null;
     if (!genRes.ok) {
-      const errText = await genRes.text();
-      log.ai("OpenAI", `HTTP ${genRes.status} Error from images/generations: ${errText.slice(0, 200)}`);
-      throw new ExternalServiceError(`OpenAI image generation failed (${genRes.status}): ${errText.slice(0, 100)}`);
+      errText = await genRes.text();
+    }
+
+    await recordApiLog({
+      service: "openai",
+      endpoint: "https://api.openai.com/v1/images/generations",
+      method: "POST",
+      status: genRes.status,
+      durationMs: Date.now() - startTime,
+      hasError: !genRes.ok,
+      errorMessage: errText,
+      metadata: { model, size, quality },
+    });
+
+    if (!genRes.ok) {
+      log.ai("OpenAI", `HTTP ${genRes.status} Error from images/generations: ${(errText || "").slice(0, 200)}`);
+      throw new ExternalServiceError(`OpenAI image generation failed (${genRes.status}): ${(errText || "").slice(0, 100)}`);
     }
 
     const data = (await genRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
     const item = data.data?.[0];
-    let previewUrl: string | null = null;
-    if (item?.url) {
+
+    if (item?.b64_json) {
+      buffer = Buffer.from(item.b64_json, "base64");
+    } else if (item?.url) {
       previewUrl = item.url;
-    } else if (item?.b64_json) {
-      previewUrl = `data:image/png;base64,${item.b64_json}`;
+      try {
+        const fetchRes = await fetch(item.url, { signal: AbortSignal.timeout(30_000) });
+        if (fetchRes.ok) {
+          buffer = Buffer.from(await fetchRes.arrayBuffer());
+        }
+      } catch (fetchErr) {
+        log.ai("OpenAI", `Could not fetch temporary OpenAI image url for R2 upload: ${fetchErr}`);
+      }
     }
-
-    if (!previewUrl) {
-      throw new ExternalServiceError("No image data returned from OpenAI Image API");
-    }
-
-    // Do NOT upload to permanent R2 storage yet!
-    // We return the transient preview URL so only the user's CHOSEN flyer gets saved to R2 on post creation.
-    log.ai("OpenAI", "Generated transient flyer option preview (not stored in R2 yet)", { url: previewUrl.slice(0, 60) });
-    return { url: previewUrl, model, size, quality };
   }
 
-  const previewDataUrl = `data:image/png;base64,${rawBuffer.toString("base64")}`;
-  return { url: previewDataUrl, model, size, quality };
+  if (buffer) {
+    if (opts.logoUrl && opts.tickedDetails?.logo !== false) {
+      try {
+        const composited = await compositeLogoOnFlyer(buffer, opts.logoUrl, format);
+        buffer = composited;
+        log.ai("OpenAI", "Composited official brand logo onto generated flyer buffer", { logoUrl: opts.logoUrl.slice(0, 60), format });
+      } catch (logoErr) {
+        log.ai("OpenAI", `Logo compositing skipped due to error: ${logoErr instanceof Error ? logoErr.message : String(logoErr)}`);
+      }
+    }
+
+    try {
+      const storageKey = `posters/${Date.now()}-${Math.random().toString(36).slice(2, 9)}.png`;
+      const uploaded = await uploadPosterImage({
+        key: storageKey,
+        body: buffer,
+        contentType: "image/png",
+      });
+      previewUrl = uploaded.publicUrl;
+      log.storage("R2", "Saved generated flyer directly to Cloudflare R2 bucket", { key: storageKey, publicUrl: previewUrl });
+    } catch (uploadErr) {
+      log.storage("R2", `Could not upload generated flyer to R2: ${uploadErr}`);
+    }
+  }
+
+  if (!previewUrl) {
+    throw new ExternalServiceError("No image data returned from OpenAI Image API");
+  }
+
+  return { url: previewUrl, model, size: opts.size || size, quality };
 }
 
 // ─── Step 3: Automatic Vision Text Check & Repair (gpt-4o-mini) ───────────────
@@ -721,9 +1207,13 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
     instruction: string;
     optionId?: string;
     currentBrief?: FlyerBrief;
+    format?: "Square" | "Portrait 4:5" | "Story";
   })
   .handler(async ({ data }) => {
     try {
+      const targetFormat = data.format || "Portrait 4:5";
+      const targetSize = targetFormat === "Square" ? "1024x1024" : targetFormat === "Story" ? "1024x1792" : "1024x1280";
+
       let businessName = "Avero Innovations";
       let tagline = "Tech Today. Tomorrow Together.";
       let brandColors = ["#00A896", "#028090", "#05668D", "#02C39A"];
@@ -757,6 +1247,12 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
             if (brandRow.caption_tone) brandTone = brandRow.caption_tone;
             if (brandRow.colors?.length) brandColors = brandRow.colors;
             if (brandRow.logo_public_url) logoUrl = brandRow.logo_public_url;
+            const wantsDiyaLogo = /\bdiya(?:\s*ai)?\b/i.test(data.instruction || "") || businessName.toLowerCase().includes("diya");
+            if (wantsDiyaLogo && (!logoUrl || logoUrl.includes("avero"))) {
+              logoUrl = "/diya-logo.png";
+            } else if (!logoUrl) {
+              logoUrl = "/diya-logo.png";
+            }
           }
         }
       } catch {
@@ -821,8 +1317,8 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
             const formData = new FormData();
             formData.append("image", blob, "source-flyer.png");
             formData.append("model", "gpt-image-2.5-flare");
-            formData.append("prompt", `Modify this flyer according to: ${editPrompt}. Maintain identical layout, logo placement, and high-end commercial quality.`);
-            formData.append("size", "1024x1280");
+            formData.append("prompt", `Modify this commercial advertisement flyer strictly according to the user's requested edit: "${data.instruction}". Specific creative adjustments: ${editPrompt}. Target canvas: ${targetFormat} (${targetSize}). Maintain identical brand typography style, logo placement, high contrast, and crisp legibility.`);
+            formData.append("size", targetSize);
             formData.append("quality", "medium");
 
             const editRes = await fetch("https://api.openai.com/v1/images/edits", {
@@ -843,7 +1339,21 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
                 if (fetchRes.ok) buffer = Buffer.from(await fetchRes.arrayBuffer());
               }
 
-              if (item?.url) {
+              if (buffer) {
+                try {
+                  const storageKey = `posters/edits/${Date.now()}-${Math.random().toString(36).slice(2, 9)}.png`;
+                  const uploaded = await uploadPosterImage({
+                    key: storageKey,
+                    body: buffer,
+                    contentType: "image/png",
+                  });
+                  editedUrl = uploaded.publicUrl;
+                  log.storage("R2", "Saved AI edited flyer directly to Cloudflare R2 bucket", { key: storageKey, publicUrl: editedUrl });
+                } catch (uploadErr) {
+                  log.storage("R2", `Could not upload edited flyer to R2: ${uploadErr}`);
+                  editedUrl = item?.url || `data:image/png;base64,${buffer.toString("base64")}`;
+                }
+              } else if (item?.url) {
                 editedUrl = item.url;
               } else if (item?.b64_json) {
                 editedUrl = `data:image/png;base64,${item.b64_json}`;
@@ -863,13 +1373,14 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
 
       // Step 3: If images/edits was not possible or didn't return an image, generate a fresh finished flyer with the updated brief!
       if (!editedUrl) {
-        log.ai("OpenAI", "Generating fresh flyer using updated brief", { updatedBrief });
+        log.ai("OpenAI", "Generating fresh flyer using updated brief with requested edits", { updatedBrief, instruction: data.instruction });
         const genResult = await generateFinishedFlyer({
           brief: updatedBrief,
           businessName,
           tagline,
           logoUrl,
           colors: brandColors,
+          format: targetFormat,
         });
         editedUrl = genResult.url;
         modelUsed = genResult.model;
@@ -886,9 +1397,10 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
         footer: tagline,
         imageUrl: editedUrl,
         brief: updatedBrief,
+        format: targetFormat,
         text_check_passed: true,
         model_used: modelUsed,
-        size: "1024x1280",
+        size: targetSize,
         quality: "medium",
       };
 
@@ -953,6 +1465,7 @@ export const editPosterText = createServerFn({ method: "POST" })
 export const generatePosters = createServerFn({ method: "POST" })
   .validator((d: unknown) => d)
   .handler(async ({ data }) => {
+    const startTime = Date.now();
     try {
       const session = await requireAuth();
 
@@ -980,7 +1493,7 @@ export const generatePosters = createServerFn({ method: "POST" })
         throw new ValidationError(`Daily poster generation limit reached for this business (${MAX_POSTERS_PER_BUSINESS_PER_DAY} posters/day).`);
       }
 
-      const { prompt, style, format, use_brand } = parsed.data;
+      const { prompt, style, format, use_brand, words_on_image, ticked_details, size: customSize, reference_image_url, template_id } = parsed.data;
       const requestedCount = Number((data as any)?.count) || parsed.data.count;
       const count = typeof requestedCount === "number" && requestedCount > 0 ? Math.min(requestedCount, 4) : 2;
 
@@ -990,6 +1503,7 @@ export const generatePosters = createServerFn({ method: "POST" })
         format: format || "Portrait 4:5",
         business: business.name,
         count,
+        hasWordsOnImage: Boolean(words_on_image),
       });
 
       // Fetch business and brand kit details for THIS business only
@@ -997,34 +1511,45 @@ export const generatePosters = createServerFn({ method: "POST" })
         business_name: string;
         tagline: string | null;
         location: string | null;
+        phone: string | null;
         colors: any;
         font: string | null;
         caption_tone: string | null;
         logo_public_url?: string | null;
       }>`
-        SELECT b.name AS business_name, b.tagline, b.location,
-               COALESCE(b.brand_colors, bk.colors) AS colors,
+        SELECT b.name AS business_name, b.tagline,
+               COALESCE(bk.location, b.location) AS location,
+               COALESCE(bk.phone, b.phone) AS phone,
+               COALESCE(bk.colors, b.brand_colors) AS colors,
                COALESCE(bk.font, 'Work Sans') AS font,
-               COALESCE(b.tone, bk.caption_tone, 'Premium') AS caption_tone,
-               COALESCE(b.logo_url, bk.logo_public_url) AS logo_public_url
+               COALESCE(bk.caption_tone, b.tone, 'Premium') AS caption_tone,
+               COALESCE(bk.logo_public_url, b.logo_url) AS logo_public_url
         FROM businesses b
         LEFT JOIN brand_kits bk ON bk.business_id = b.id
         WHERE b.id = ${business.id}
       `;
 
-      const businessName = brandRow?.business_name || business.name;
-      const tagline = brandRow?.tagline || business.tagline || "";
-      const rawColors = brandRow?.colors;
+      const passedBrand = parsed.data.brand_details;
+      const businessName = passedBrand?.business_name || brandRow?.business_name || business.name;
+      const tagline = passedBrand?.tagline || brandRow?.tagline || business.tagline || "";
+      const rawColors = passedBrand?.colors || brandRow?.colors;
       const brandColors = Array.isArray(rawColors) && rawColors.length > 0
         ? rawColors
         : (typeof rawColors === "string" ? [rawColors] : ["#00A896", "#028090", "#05668D", "#02C39A"]);
 
-      // Selected business logo (never mix logos from other businesses)
-      const logoUrl = brandRow?.logo_public_url || (
-        businessName.toLowerCase().includes("avero")
-          ? "https://dihikyljbrbidqgelwac.supabase.co/storage/v1/object/public/post-pilot/logos/7d7831d4-8c66-407b-acbc-a2060d66ff00/1792316942214-avero_logo_transparent.png"
-          : null
-      );
+      const phone = passedBrand?.phone || brandRow?.phone || (business as any)?.phone || "";
+      const email = passedBrand?.email || session.email || "";
+      const website = passedBrand?.website || (business as any)?.website || "";
+      const location = passedBrand?.location || brandRow?.location || "";
+
+      // Selected business logo: prioritize brand kit updated logo, passed brand logo, or business logo
+      let logoUrl = passedBrand?.logo_url || brandRow?.logo_public_url || null;
+      const wantsDiyaLogo = /\bdiya(?:\s*ai)?\b/i.test(parsed.data.prompt || "") || businessName.toLowerCase().includes("diya");
+      if (wantsDiyaLogo && (!logoUrl || logoUrl.includes("avero"))) {
+        logoUrl = "/diya-logo.png";
+      } else if (!logoUrl) {
+        logoUrl = "/diya-logo.png";
+      }
 
       const apiKey = getOpenAiApiKey();
       const options: PosterOption[] = [];
@@ -1050,9 +1575,17 @@ export const generatePosters = createServerFn({ method: "POST" })
             tagline,
             colors: brandColors,
             tone: brandRow?.caption_tone || "Premium",
-            location: brandRow?.location ?? undefined,
+            location,
+            phone,
+            email,
+            website,
+            wordsOnImage: words_on_image,
+            tickedDetails: ticked_details as any,
             layout: layouts[i % layouts.length],
             directionIndex: i,
+            format: format as any,
+            referenceImageUrl: reference_image_url,
+            templateId: template_id,
           });
 
           let flyerUrl: string | undefined = undefined;
@@ -1073,7 +1606,16 @@ export const generatePosters = createServerFn({ method: "POST" })
                   tagline,
                   logoUrl,
                   colors: brandColors,
-                  format,
+                  format: format as any,
+                  wordsOnImage: words_on_image,
+                  phone,
+                  email,
+                  website,
+                  location,
+                  tickedDetails: ticked_details as any,
+                  size: customSize,
+                  referenceImageUrl: reference_image_url,
+                  templateId: template_id,
                 });
 
                 itemModel = genResult.model;
@@ -1115,12 +1657,14 @@ export const generatePosters = createServerFn({ method: "POST" })
             theme: ["tomato", "olive", "mustard", "plum"][i % 4]!,
             eyebrow: businessName.toUpperCase(),
             headline: brief.headline,
-            price: brief.badge_text || brief.price_text,
+            price: brief.prize_text || brief.badge_text || brief.price_text,
             date_text: brief.date_text || undefined,
+            time_text: brief.time_text || undefined,
             venue_text: brief.venue_text || undefined,
+            prize_text: brief.prize_text || undefined,
             footer: tagline || "IDEAS INTO SCALABLE PRODUCTS",
             imageUrl: flyerUrl,
-            format,
+            format: format as any,
             brief,
             text_check_passed: textCheckPassed,
             needs_review: needsReview,
@@ -1170,8 +1714,39 @@ export const generatePosters = createServerFn({ method: "POST" })
         costUsd,
       });
 
+      await recordApiLog({
+        businessId: business.id,
+        service: "openai",
+        endpoint: "/api/posters/generate",
+        method: "POST",
+        status: 200,
+        durationMs: Date.now() - startTime,
+        hasError: false,
+        metadata: {
+          prompt: prompt.slice(0, 80),
+          format,
+          style,
+          count: options.length,
+          modelUsed,
+          costUsd,
+        },
+      });
+
       return apiSuccess({ options }, "Poster options generated successfully");
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const statusCode = (err as any)?.statusCode || 500;
+      await recordApiLog({
+        businessId: (data as any)?.business_id,
+        service: "openai",
+        endpoint: "/api/posters/generate",
+        method: "POST",
+        status: statusCode,
+        durationMs: Date.now() - startTime,
+        hasError: true,
+        errorMessage: errMsg,
+        metadata: { error: errMsg },
+      });
       return errorToResponse(err);
     }
   }

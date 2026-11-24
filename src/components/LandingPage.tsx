@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DIYA_LOGO_URL } from "@/lib/branding";
+import { DiyaLogo } from "@/components/DiyaLogo";
 
 const SUPABASE_STORAGE_URL = "https://dihikyljbrbidqgelwac.supabase.co/storage/v1/object/public/post-pilot";
 const PIZZA_IMG_URL = `${SUPABASE_STORAGE_URL}/showcase/pizza_offer_showcase.jpg`;
@@ -135,10 +136,9 @@ export function LandingPage({
       <header className="sticky top-0 z-50 border-b border-white/[0.08] bg-[#090A0E]/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
-            <img
-              src={DIYA_LOGO_URL}
-              alt="dIyA AI Digital Marketing"
-              className="h-9 sm:h-10 w-auto object-contain"
+            <DiyaLogo
+              markClassName="h-7 sm:h-8"
+              textClassName="text-[9px] sm:text-[10px] tracking-[0.24em]"
             />
           </div>
 
@@ -1164,10 +1164,9 @@ export function LandingPage({
             {/* Brand & Mission column */}
             <div className="lg:col-span-2 space-y-4">
               <div className="flex items-center gap-3">
-                <img
-                  src={DIYA_LOGO_URL}
-                  alt="dIyA AI Digital Marketing"
-                  className="h-9 sm:h-10 w-auto object-contain"
+                <DiyaLogo
+                  markClassName="h-7 sm:h-8"
+                  textClassName="text-[9px] sm:text-[10px] tracking-[0.24em]"
                 />
               </div>
               <p className="max-w-sm text-sm leading-relaxed text-zinc-400">

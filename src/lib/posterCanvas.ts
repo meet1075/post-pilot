@@ -12,6 +12,8 @@ export interface RenderPosterOptions {
   theme: string;
   eyebrow: string;
   headline: string;
+  subheadline?: string | undefined;
+  ctaText?: string | undefined;
   price?: string | undefined;
   dateText?: string | undefined;
   footer?: string | undefined;
@@ -19,6 +21,12 @@ export interface RenderPosterOptions {
   logoUrl?: string | undefined;
   font?: string | undefined;
   format?: string | undefined;
+  contactInfo?: {
+    phone?: string | undefined;
+    email?: string | undefined;
+    website?: string | undefined;
+    location?: string | undefined;
+  } | undefined;
 }
 
 const THEME_COLORS: Record<string, { bg: string; text: string; accent: string }> = {
@@ -198,11 +206,41 @@ export async function renderPosterCanvas(opts: RenderPosterOptions): Promise<str
     ctx.restore();
   }
 
-  // 7. Footer text
-  ctx.fillStyle = textColor;
-  ctx.font = '700 24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-  const footerSpaced = (opts.footer || "GOOD FOOD, GOOD COMPANY").toUpperCase().split("").join(" ");
-  ctx.fillText(footerSpaced, width / 2, height - 140);
+  // 7. Footer & Contact Strip (Phone, Email, Website)
+  const contactParts: string[] = [];
+  if (opts.contactInfo?.phone) contactParts.push(`📞 ${opts.contactInfo.phone}`);
+  if (opts.contactInfo?.email) contactParts.push(`✉️ ${opts.contactInfo.email}`);
+  if (opts.contactInfo?.website) contactParts.push(`🌐 ${opts.contactInfo.website}`);
+  if (opts.contactInfo?.location) contactParts.push(`📍 ${opts.contactInfo.location}`);
+
+  if (contactParts.length > 0) {
+    const contactText = contactParts.join("    ");
+    ctx.save();
+    ctx.font = '600 24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    const textWidth = ctx.measureText(contactText).width;
+    const barWidth = Math.min(width - 120, textWidth + 80);
+    const barHeight = 56;
+    const barX = (width - barWidth) / 2;
+    const barY = height - 120;
+
+    // Translucent dark frosted pill
+    ctx.fillStyle = "rgba(10, 15, 25, 0.75)";
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barWidth, barHeight, 28);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillText(contactText, width / 2, barY + barHeight / 2 + 2);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = textColor;
+    ctx.font = '700 24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    const footerSpaced = (opts.footer || "GOOD FOOD, GOOD COMPANY").toUpperCase().split("").join(" ");
+    ctx.fillText(footerSpaced, width / 2, height - 140);
+  }
 
   // 9. Brand Logo mark badge (top-right)
   if (opts.logoUrl) {

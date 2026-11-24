@@ -24,6 +24,7 @@ import {
   NotFoundError,
 } from "../lib/errors.js";
 import { apiSuccess, formatZodIssues } from "../lib/apiResponse.js";
+import { recordApiLog } from "../lib/auditLogger.js";
 import Zernio from "@zernio/node";
 
 export interface SocialAccountItem {
@@ -261,6 +262,7 @@ export const getZernioConnectUrl = createServerFn({ method: "GET" })
 export const connectAccount = createServerFn({ method: "POST" })
   .validator((d: unknown) => d)
   .handler(async ({ data }) => {
+    const startTime = Date.now();
     try {
       const session = await requireAuth();
 
@@ -403,12 +405,36 @@ export const connectAccount = createServerFn({ method: "POST" })
         )
       `;
 
+      await recordApiLog({
+        businessId: business.id,
+        service: "zernio",
+        endpoint: "/api/accounts/connect",
+        method: "POST",
+        status: 200,
+        durationMs: Date.now() - startTime,
+        hasError: false,
+        metadata: { platform: d.platform, username: cleanUsername, accountId: account?.id },
+      });
+
       return apiSuccess({
         account,
         businessId: business.id,
         businessName: business.name,
       }, `${d.platform} account @${cleanUsername} connected successfully`);
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const statusCode = (err as any)?.statusCode || 400;
+      await recordApiLog({
+        businessId: (data as any)?.business_id,
+        service: "zernio",
+        endpoint: "/api/accounts/connect",
+        method: "POST",
+        status: statusCode,
+        durationMs: Date.now() - startTime,
+        hasError: true,
+        errorMessage: errMsg,
+        metadata: { error: errMsg },
+      });
       return errorToResponse(err);
     }
   });
@@ -418,6 +444,7 @@ export const connectAccount = createServerFn({ method: "POST" })
 export const disconnectAccount = createServerFn({ method: "POST" })
   .validator((d: { account_id?: string | undefined; platform?: string | undefined; business_id?: string | undefined }) => d)
   .handler(async ({ data }) => {
+    const startTime = Date.now();
     try {
       const session = await requireAuth();
       const targetBusinessId = data?.business_id || session.businessId;
@@ -451,8 +478,32 @@ export const disconnectAccount = createServerFn({ method: "POST" })
         throw new ValidationError("Account ID or platform is required");
       }
 
+      await recordApiLog({
+        businessId: targetBusinessId,
+        service: "zernio",
+        endpoint: "/api/accounts/disconnect",
+        method: "POST",
+        status: 200,
+        durationMs: Date.now() - startTime,
+        hasError: false,
+        metadata: { accountId: account_id, platform },
+      });
+
       return apiSuccess({ success: true }, "Account disconnected successfully");
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const statusCode = (err as any)?.statusCode || 400;
+      await recordApiLog({
+        businessId: (data as any)?.business_id,
+        service: "zernio",
+        endpoint: "/api/accounts/disconnect",
+        method: "POST",
+        status: statusCode,
+        durationMs: Date.now() - startTime,
+        hasError: true,
+        errorMessage: errMsg,
+        metadata: { error: errMsg },
+      });
       return errorToResponse(err);
     }
   });
