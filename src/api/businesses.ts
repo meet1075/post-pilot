@@ -80,15 +80,15 @@ export const getBusiness = createServerFn({ method: "GET" })
         success: true,
         business: {
           ...business,
-          location: business.location || brandKit?.location || "",
-          phone: business.phone || brandKit?.phone || "",
-          website: (business as any).website || brandKit?.website || "",
-          email: (business as any).email || brandKit?.email || "",
+          location: brandKit?.location || business.location || "",
+          phone: brandKit?.phone || business.phone || "",
+          website: brandKit?.website || (business as any).website || "",
+          email: brandKit?.email || (business as any).email || "",
           font: brandKit?.font || "Work Sans",
-          logo_url: business.logo_url || brandKit?.logo_public_url || null,
-          brand_colors: business.brand_colors || brandKit?.colors || ["Tomato"],
-          tone: business.tone || brandKit?.caption_tone || "Friendly",
-          default_hashtags: business.default_hashtags || brandKit?.default_hashtags || "",
+          logo_url: brandKit?.logo_public_url || business.logo_url || null,
+          brand_colors: (brandKit?.colors && brandKit.colors.length > 0) ? brandKit.colors : (business.brand_colors || ["Tomato"]),
+          tone: brandKit?.caption_tone || business.tone || "Friendly",
+          default_hashtags: brandKit?.default_hashtags || business.default_hashtags || "",
         },
       };
     } catch (err) {
@@ -127,15 +127,25 @@ export const listUserBusinesses = createServerFn({ method: "GET" }).handler(
         updated_at: string;
       }>`
         SELECT
-          b.id, b.name, b.tagline, b.logo_url, b.brand_colors, b.tone,
-          b.default_hashtags, b.timezone, b.location, b.phone, b.website, b.email, b.business_type,
+          b.id, b.name, b.tagline,
+          COALESCE(bk.logo_public_url, b.logo_url) AS logo_url,
+          COALESCE(bk.colors, b.brand_colors) AS brand_colors,
+          COALESCE(bk.caption_tone, b.tone) AS tone,
+          COALESCE(bk.default_hashtags, b.default_hashtags) AS default_hashtags,
+          b.timezone,
+          COALESCE(bk.location, b.location) AS location,
+          COALESCE(bk.phone, b.phone) AS phone,
+          COALESCE(bk.website, b.website) AS website,
+          COALESCE(bk.email, b.email) AS email,
+          b.business_type,
           b.is_active, b.created_at, b.updated_at,
           COUNT(sa.id) FILTER (WHERE sa.status = 'connected' AND sa.deleted_at IS NULL) as connected_accounts_count
         FROM businesses b
+        LEFT JOIN brand_kits bk ON bk.business_id = b.id
         LEFT JOIN social_accounts sa ON sa.business_id = b.id
         WHERE (b.owner_id = ${session.userId} OR b.owner_user_id = ${session.userId})
           AND b.deleted_at IS NULL
-        GROUP BY b.id
+        GROUP BY b.id, bk.id
         ORDER BY b.created_at ASC
       `;
 

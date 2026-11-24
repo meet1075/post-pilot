@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import type { PosterOption } from "./posters";
+import {
+  parseStructuredPrompt,
+  isMetaPhrase,
+  extractNamedProduct,
+  compositeLogoOnFlyer,
+} from "./posters";
 import { generatePostersSchema } from "../lib/validators";
+import sharp from "sharp";
 
 describe("Poster API, Image Generation & Aspect Ratio Rules", () => {
   describe("generatePostersSchema Input Validation", () => {
@@ -384,6 +391,81 @@ describe("Poster API, Image Generation & Aspect Ratio Rules", () => {
       expect(directives).toContain("Absolutely NO black borders, NO black letterboxing, NO pillarboxing");
       expect(directives).toContain("NO curved arch/dome cutouts");
       expect(directives).toContain("1024x1792");
+    });
+  });
+
+  describe("Structured Prompt Parsing & Meta-Phrase Filtering", () => {
+    const blackFridayPrompt = `Create a premium, eye-catching **Black Friday promotional poster** for **Diya AI Marketing Agency**.
+
+**Main Headline:**
+BLACK FRIDAY SALE
+
+**BIG OFFER:**
+30% OFF ON ALL SUBSCRIPTIONS
+
+**Supporting Text:**
+Supercharge your brand's social media marketing with AI. Create, manage, schedule, and publish smarter — all from one platform.
+
+**CTA:** Grab Your Deal Now!
+
+**Design Direction:**
+- Premium black and gold theme with bold typography.
+- Large, visually striking "30% OFF" in the center.`;
+
+    it("parses explicit structured blocks (Headline, BIG OFFER, Supporting Text, CTA)", () => {
+      const parsed = parseStructuredPrompt(blackFridayPrompt);
+      expect(parsed.headline).toBe("BLACK FRIDAY SALE");
+      expect(parsed.offer).toBe("30% OFF ON ALL SUBSCRIPTIONS");
+      expect(parsed.supportingText).toContain("Supercharge your brand's social media marketing with AI");
+      expect(parsed.cta).toBe("Grab Your Deal Now!");
+    });
+
+    it("identifies meta-phrases and distinguishes them from real brand/product names", () => {
+      expect(isMetaPhrase("Black Friday promotional poster")).toBe(true);
+      expect(isMetaPhrase("promotional poster")).toBe(true);
+      expect(isMetaPhrase("social media post")).toBe(true);
+      expect(isMetaPhrase("flyer")).toBe(true);
+      expect(isMetaPhrase("Diya AI Marketing Agency")).toBe(false);
+      expect(isMetaPhrase("Avero Innovations")).toBe(false);
+    });
+
+    it("extracts named product without selecting generic meta-phrases", () => {
+      const product = extractNamedProduct(blackFridayPrompt);
+      expect(product).toBe("Diya AI Marketing Agency");
+      expect(product).not.toContain("promotional poster");
+    });
+  });
+
+  describe("Server-Side Brand Logo Compositing", () => {
+    it("composites a brand logo onto a generated flyer canvas at top center", async () => {
+      // Create a dummy 1024x1280 flyer buffer
+      const dummyFlyer = await sharp({
+        create: {
+          width: 1024,
+          height: 1280,
+          channels: 4,
+          background: { r: 20, g: 20, b: 25, alpha: 1 },
+        },
+      }).png().toBuffer();
+
+      // Create a dummy 400x120 logo buffer with transparent alpha
+      const dummyLogo = await sharp({
+        create: {
+          width: 400,
+          height: 120,
+          channels: 4,
+          background: { r: 0, g: 168, b: 150, alpha: 1 },
+        },
+      }).png().toBuffer();
+
+      const logoDataUrl = `data:image/png;base64,${dummyLogo.toString("base64")}`;
+      const composited = await compositeLogoOnFlyer(dummyFlyer, logoDataUrl, "Portrait 4:5");
+
+      const meta = await sharp(composited).metadata();
+      expect(meta.width).toBe(1024);
+      expect(meta.height).toBe(1280);
+      expect(meta.format).toBe("png");
+      expect(composited.length).toBeGreaterThan(0);
     });
   });
 });

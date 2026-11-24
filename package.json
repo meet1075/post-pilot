@@ -86,6 +86,7 @@
     "react-resizable-panels": "^4.6.5",
     "recharts": "^2.15.4",
     "resend": "^6.33.0",
+    "sharp": "^0.35.5",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.1",

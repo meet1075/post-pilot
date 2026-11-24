@@ -95,6 +95,68 @@ interface BrandKitRow {
   logo_public_url?: string | null;
 }
 
+// ─── Helpers for Structured Prompt & Product Extraction ───────────────────────
+
+export function isMetaPhrase(text: string): boolean {
+  if (!text || typeof text !== "string") return false;
+  return /^(?:black friday\s+)?(?:eye-catching\s+)?(?:premium\s+)?(?:promotional\s+)?(?:social media\s+)?(?:instagram\s+)?(?:facebook\s+)?(?:poster|flyer|banner|post|graphic|ad|advertisement|creative|campaign|design|image|photo)s?$/i.test(text.trim());
+}
+
+export function parseStructuredPrompt(prompt: string) {
+  const headlineMatch = prompt.match(/(?:\*\*\s*(?:Main\s+)?Headline:?\s*\*\*|(?:^|\n)\s*(?:Main\s+)?Headline:?)\s*([^\n*]+)/i);
+  const offerMatch = prompt.match(/(?:\*\*\s*(?:BIG\s+)?(?:Offer|Discount|Deal):?\s*\*\*|(?:^|\n)\s*(?:BIG\s+)?(?:Offer|Discount|Deal):?)\s*([^\n*]+)/i);
+  const supportingMatch = prompt.match(/(?:\*\*\s*(?:Supporting\s+Text|Subline|Subtitle|Tagline|Description):?\s*\*\*|(?:^|\n)\s*(?:Supporting\s+Text|Subline|Subtitle|Tagline|Description):?)\s*([^\n*]+)/i);
+  const ctaMatch = prompt.match(/(?:\*\*\s*(?:CTA|Call\s+to\s+Action):?\s*\*\*|(?:^|\n)\s*(?:CTA|Call\s+to\s+Action):?)\s*([^\n*]+)/i);
+  const venueMatch = prompt.match(/(?:\*\*\s*(?:Venue|Location|Place):?\s*\*\*|(?:^|\n)\s*(?:Venue|Location|Place):?)\s*([^\n*]+)/i);
+  const dateMatch = prompt.match(/(?:\*\*\s*(?:Date|Dates|Day):?\s*\*\*|(?:^|\n)\s*(?:Date|Dates|Day):?)\s*([^\n*]+)/i);
+  const timeMatch = prompt.match(/(?:\*\*\s*(?:Time|Timing|Hours):?\s*\*\*|(?:^|\n)\s*(?:Time|Timing|Hours):?)\s*([^\n*]+)/i);
+  const prizeMatch = prompt.match(/(?:\*\*\s*(?:Prize\s*Pool|Prize|Cash\s*Prize):?\s*\*\*|(?:^|\n)\s*(?:Prize\s*Pool|Prize|Cash\s*Prize):?)\s*([^\n*]+)/i);
+
+  return {
+    headline: headlineMatch?.[1]?.trim(),
+    offer: offerMatch?.[1]?.trim(),
+    supportingText: supportingMatch?.[1]?.trim(),
+    cta: ctaMatch?.[1]?.trim(),
+    venue: venueMatch?.[1]?.trim(),
+    date: dateMatch?.[1]?.trim(),
+    time: timeMatch?.[1]?.trim(),
+    prize: prizeMatch?.[1]?.trim(),
+  };
+}
+
+export function extractNamedProduct(prompt: string): string {
+  const forProductMatch = prompt.match(/\bfor\s+(?:\*\*)?([A-Za-z0-9\s&–—\-]+?)(?:\*\*)?(?:\.|\n|$|,)/i);
+  if (forProductMatch && forProductMatch[1]) {
+    const candidate = forProductMatch[1].trim();
+    if (!isMetaPhrase(candidate) && candidate.length > 2) {
+      return candidate;
+    }
+  }
+
+  const boldMatches = [...prompt.matchAll(/\*\*([^*]+)\*\*/g)];
+  for (const m of boldMatches) {
+    const text = m[1]?.trim() || "";
+    if (/^(?:main\s+)?headline:?|^(?:big\s+)?offer:?|^supporting\s+text:?|^cta:?|^design\s+direction:?/i.test(text)) {
+      continue;
+    }
+    if (!isMetaPhrase(text) && text.length > 2 && text.length < 60) {
+      return text;
+    }
+  }
+
+  const quotesMatch = prompt.match(/["']([^"']{2,60})["']/);
+  if (quotesMatch && quotesMatch[1] && !isMetaPhrase(quotesMatch[1])) {
+    return quotesMatch[1].trim();
+  }
+
+  const actionMatch = prompt.match(/\b(?:building|launching|introducing|announcing|presenting|creating|making)\s+([A-Za-z0-9\s–—\-]+?)(?:,\s*|\s+(?:an|a|the)\b)/i);
+  if (actionMatch && actionMatch[1] && !isMetaPhrase(actionMatch[1])) {
+    return actionMatch[1].trim();
+  }
+
+  return "";
+}
+
 // ─── Step 1: Flyer Brief Generation (gpt-4o-mini) ─────────────────────────────
 
 export async function generateFlyerBrief(opts: {
@@ -147,10 +209,8 @@ export async function generateFlyerBrief(opts: {
   ];
   const directionVariation = directionConcepts[directionIndex % directionConcepts.length];
 
-  const boldMatch = opts.prompt.match(/\*\*([^*]+)\*\*/);
-  const quotesMatch = opts.prompt.match(/["']([^"']{2,60})["']/);
-  const actionMatch = opts.prompt.match(/\b(?:building|launching|introducing|announcing|presenting|creating|making)\s+([A-Za-z0-9\s–—\-]+?)(?:,\s*|\s+(?:an|a|the)\b)/i);
-  const namedProduct = (boldMatch?.[1] || quotesMatch?.[1] || actionMatch?.[1] || "").trim();
+  const structured = parseStructuredPrompt(opts.prompt);
+  const namedProduct = extractNamedProduct(opts.prompt);
 
   const systemPrompt = `You are an elite commercial creative director and advertising copywriter creating a flyer brief for an Instagram advertisement (${formatInstruction}).
 Your primary mission is to identify the EXACT domain and topic of the user's prompt and create an authentic, category-specific advertisement brief tailored for this format.
@@ -262,11 +322,18 @@ Target Format & Aspect Ratio: "${format}" (${formatInstruction})${namedProduct ?
             : "";
           const rawHeroTitle = typeof parsed.hero_title === "string" ? parsed.hero_title.trim() : "";
 
-          let finalHeadline = String(parsed.headline || namedProduct || "Celebrate With Us").trim();
-          let finalHeroTitle = rawHeroTitle || namedProduct || "GRAND FESTIVE PARTY";
-          let finalCta = String(parsed.cta || "Cordially welcoming all team members and partners.").trim();
+          let finalHeadline = structured.headline || String(parsed.headline || (namedProduct && !isMetaPhrase(namedProduct) ? namedProduct : "Celebrate With Us")).trim();
+          let finalHeroTitle = structured.supportingText || rawHeroTitle || (namedProduct && !isMetaPhrase(namedProduct) ? namedProduct : "SPECIAL EVENT");
+          let finalCta = structured.cta || String(parsed.cta || "Cordially welcoming all team members and partners.").trim();
 
-          if (namedProduct) {
+          if (isMetaPhrase(finalHeroTitle)) {
+            finalHeroTitle = structured.supportingText || (namedProduct && !isMetaPhrase(namedProduct) ? namedProduct : "");
+          }
+          if (isMetaPhrase(finalHeadline)) {
+            finalHeadline = structured.headline || (namedProduct && !isMetaPhrase(namedProduct) ? namedProduct : "Exclusive Offer");
+          }
+
+          if (namedProduct && !isMetaPhrase(namedProduct) && !structured.headline) {
             if (!finalHeadline.toLowerCase().includes(namedProduct.toLowerCase()) && !finalHeroTitle.toLowerCase().includes(namedProduct.toLowerCase())) {
               finalHeroTitle = namedProduct;
               finalHeadline = namedProduct;
@@ -284,9 +351,9 @@ Target Format & Aspect Ratio: "${format}" (${formatInstruction})${namedProduct ?
           if (finalCta.toLowerCase() === finalHeadline.toLowerCase()) {
             finalCta = rawPrize ? `🏆 ${rawPrize}` : "⚡ Welcome Team";
           }
-          let badgeText = rawBadge;
+          let badgeText = structured.offer || rawBadge;
           if (!badgeText || badgeText.toLowerCase() === finalHeadline.toLowerCase()) {
-            badgeText = rawPrize ? `🏆 ${rawPrize}` : (rawTime ? `⏰ ${rawTime}` : "SPECIAL EVENT");
+            badgeText = structured.offer || (rawPrize ? `🏆 ${rawPrize}` : (rawTime ? `⏰ ${rawTime}` : "SPECIAL EVENT"));
           }
 
           return {
@@ -350,6 +417,28 @@ Target Format & Aspect Ratio: "${format}" (${formatInstruction})${namedProduct ?
   const liveMusicMatch = /live music/i.test(opts.prompt);
   const buffetMatch = /gourmet buffet|buffet|dinner|food/i.test(opts.prompt);
   const giveawayMatch = /giveaways?|gifts?|prizes?/i.test(opts.prompt);
+
+  if (structured.headline) {
+    const isRetail = /sale|black friday|discount|offer|deal|cyber monday/i.test(opts.prompt);
+    return {
+      category: isRetail ? "retail_sale" : (isCelebration ? "celebration_event" : "general_commercial"),
+      headline: structured.headline,
+      hero_title: structured.supportingText || (namedProduct && !isMetaPhrase(namedProduct) ? namedProduct : "SPECIAL OFFER"),
+      badge_text: structured.offer || "SPECIAL OFFER",
+      price_text: structured.offer || "SPECIAL OFFER",
+      date_text: structured.date || fallbackDate,
+      time_text: structured.time || fallbackTime,
+      venue_text: structured.venue || fallbackVenue,
+      prize_text: structured.prize || fallbackPrize,
+      features: structured.offer ? [structured.offer, "All Subscriptions", "Limited Time Deal"] : ["Custom Solution", "Mobile Responsive", "Growth Ready"],
+      cta: structured.cta || "GRAB YOUR DEAL NOW →",
+      scene: isRetail
+        ? "Dramatic, high-end Black Friday sale atmosphere with polished black and gold luxury aesthetics, glowing discount pedestals, modern AI elements, and sleek depth of field."
+        : "Contemporary minimalist professional workplace with clean ambient lighting and sharp displays",
+      layout: opts.layout || "full-bleed-cinematic",
+      style_notes: isRetail ? "Black and gold luxury theme, sleek glowing amber accents, professional commercial lighting" : `${brandColors}, clean commercial aesthetic`,
+    };
+  }
 
   if (isSportsOrCricket) {
     const sportsScenes = [
@@ -436,6 +525,75 @@ Target Format & Aspect Ratio: "${format}" (${formatInstruction})${namedProduct ?
     layout: opts.layout || "full-bleed-cinematic",
     style_notes: `${brandColors}, clean commercial aesthetic`,
   };
+}
+
+// ─── Logo Compositing Helper (Sharp) ──────────────────────────────────────────
+
+export async function compositeLogoOnFlyer(
+  flyerBuffer: Buffer,
+  logoUrl: string,
+  format: "Square" | "Portrait 4:5" | "Story" = "Portrait 4:5"
+): Promise<Buffer> {
+  const { default: sharp } = await import("sharp");
+
+  let logoBuffer: Buffer;
+  if (logoUrl.startsWith("data:")) {
+    const base64Data = logoUrl.replace(/^data:image\/\w+;base64,/, "");
+    logoBuffer = Buffer.from(base64Data, "base64");
+  } else {
+    const res = await fetch(logoUrl, { signal: AbortSignal.timeout(12_000) });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch logo image (${res.status})`);
+    }
+    logoBuffer = Buffer.from(await res.arrayBuffer());
+  }
+
+  // Inspect flyer dimensions
+  const flyerMeta = await sharp(flyerBuffer).metadata();
+  const flyerW = flyerMeta.width || (format === "Square" ? 1024 : format === "Story" ? 1024 : 1024);
+
+  // Process logo: check corner pixels and remove solid black or white backgrounds
+  const logoSharp = sharp(logoBuffer);
+  const { data, info } = await logoSharp.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+
+  const cornerR = data[0] ?? 0;
+  const cornerG = data[1] ?? 0;
+  const cornerB = data[2] ?? 0;
+  const isBlackBg = cornerR < 25 && cornerG < 25 && cornerB < 25;
+  const isWhiteBg = cornerR > 230 && cornerG > 230 && cornerB > 230;
+
+  if (isBlackBg) {
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i]! < 25 && data[i + 1]! < 25 && data[i + 2]! < 25) {
+        data[i + 3] = 0; // Transparent
+      }
+    }
+  } else if (isWhiteBg) {
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i]! > 230 && data[i + 1]! > 230 && data[i + 2]! > 230) {
+        data[i + 3] = 0; // Transparent
+      }
+    }
+  }
+
+  const maxW = format === "Story" ? 320 : 280;
+  const maxH = format === "Story" ? 95 : 80;
+
+  const trimmedLogo = await sharp(data, {
+    raw: { width: info.width, height: info.height, channels: 4 },
+  })
+    .trim()
+    .resize({ width: maxW, height: maxH, fit: "inside" })
+    .png()
+    .toBuffer({ resolveWithObject: true });
+
+  const left = Math.max(0, Math.round((flyerW - trimmedLogo.info.width) / 2));
+  const top = format === "Story" ? 110 : (format === "Square" ? 50 : 60);
+
+  return await sharp(flyerBuffer)
+    .composite([{ input: trimmedLogo.data, top, left }])
+    .png()
+    .toBuffer();
 }
 
 // ─── Step 2: Single-Shot Finished Flyer Generation (OpenAI) ──────────────────
@@ -555,9 +713,9 @@ export async function generateFinishedFlyer(opts: {
   // Feature pills with icons
   const featureInstruction = `Feature row with three distinct icon badges: '${f1}', '${f2}', '${f3}'. `;
 
-  // Top header instruction: Tell model to place supplied logo unchanged with bright, clean, seamless environmental lighting
+  // Top header instruction: Reserve top negative space and strictly prohibit drawing hallucinated brand logos/emblems
   const topLogoInstruction = opts.logoUrl
-    ? `Top Header: Place the supplied brand logo neatly at the top center, unchanged, with tagline '${opts.tagline || ""}'. Maintain clean, bright, seamless environmental lighting matching the room background. Absolutely NO black vignette, NO dark smoke, NO top shadow, NO black gradient behind or around the logo. The top of the poster must remain clean, bright, and evenly illuminated.`
+    ? `Top Header & Logo Safe Area: Keep the top 15% of the poster as clean, spacious negative space with seamless lighting matching the environment. CRITICAL BRAND LOGO DIRECTIVE: Absolutely DO NOT paint, invent, draw, or render any company emblem, logo icon, crest, or fake brand symbol at the top or in the header. Do NOT write fake brand names or watermarks like GodiyaAI or invented logos. Leave the top header empty, clean, and uncluttered so the official brand logo can be cleanly composited there.`
     : `Top Header: Brand name '${opts.businessName.toUpperCase()}' cleanly styled with tagline '${opts.tagline || ""}'. The top header must remain clean, bright, and evenly illuminated without any black vignette or dark smoke.`;
 
   // Bottom contact strip instruction
@@ -571,10 +729,15 @@ export async function generateFinishedFlyer(opts: {
     ? `At the bottom: sleek, frosted dark translucent contact pill with clean icons: ${contactParts.join(" and ")}. `
     : "";
 
+  const isSaleOrPromo =
+    opts.brief.category === "retail_sale" ||
+    /\b(sale|discount|offer|black friday|cyber monday|deal|clearance)\b/i.test(opts.brief.headline);
+
   const isTechOrCorporate =
     opts.brief.category === "product_tech" ||
     (opts.brief.category as string) === "corporate_announcement" ||
     opts.brief.category === "sports_tournament" ||
+    isSaleOrPromo ||
     Boolean(opts.wordsOnImage);
 
   // Distinct pill badge that NEVER duplicates headline
@@ -588,9 +751,16 @@ export async function generateFinishedFlyer(opts: {
     badgePill = "⚡ Special Event";
   }
 
+  // Filter out any meta phrases like "promotional poster" from hero_title
+  const cleanHeroTitle = (opts.brief.hero_title && !isMetaPhrase(opts.brief.hero_title))
+    ? opts.brief.hero_title
+    : (opts.tagline || "");
+
   // Center display typography instruction
-  const titleInstruction = isTechOrCorporate
-    ? `Upper third typography: Bold, modern, clean sans-serif headline: '${opts.brief.headline}'. Supporting clean subline: '${opts.brief.hero_title || opts.tagline || ""}'. Action pill badge button: '${badgePill}'. `
+  const titleInstruction = isSaleOrPromo
+    ? `Main Sale Headline in bold prominent typography: '${opts.brief.headline}'. Centerpiece Big Offer badge or discount banner: '${opts.brief.badge_text || opts.brief.price_text}'. ${cleanHeroTitle ? `Supporting text: '${cleanHeroTitle}'. ` : ""}${opts.brief.cta ? `Call to action button: '${opts.brief.cta}'. ` : ""}`
+    : isTechOrCorporate
+    ? `Upper third typography: Bold, modern, clean sans-serif headline: '${opts.brief.headline}'. ${cleanHeroTitle ? `Supporting clean subline: '${cleanHeroTitle}'. ` : ""}Action pill badge button: '${badgePill}'. `
     : `Secondary invitation headline: '${opts.brief.headline}'. Centerpiece main title in huge, prominent lettering: '${heroTitle}'. `;
 
   // Footer / CTA instruction (omit duplicate bottom CTA if contact bar is present)
@@ -686,6 +856,16 @@ CRITICAL TEXT INTEGRITY: Render ONLY the quoted text exactly as written. Ensure 
   }
 
   if (buffer) {
+    if (opts.logoUrl && opts.tickedDetails?.logo !== false) {
+      try {
+        const composited = await compositeLogoOnFlyer(buffer, opts.logoUrl, format);
+        buffer = composited;
+        log.ai("OpenAI", "Composited official brand logo onto generated flyer buffer", { logoUrl: opts.logoUrl.slice(0, 60), format });
+      } catch (logoErr) {
+        log.ai("OpenAI", `Logo compositing skipped due to error: ${logoErr instanceof Error ? logoErr.message : String(logoErr)}`);
+      }
+    }
+
     try {
       const storageKey = `posters/${Date.now()}-${Math.random().toString(36).slice(2, 9)}.png`;
       const uploaded = await uploadPosterImage({
@@ -1224,11 +1404,13 @@ export const generatePosters = createServerFn({ method: "POST" })
         caption_tone: string | null;
         logo_public_url?: string | null;
       }>`
-        SELECT b.name AS business_name, b.tagline, b.location, b.phone,
-               COALESCE(b.brand_colors, bk.colors) AS colors,
+        SELECT b.name AS business_name, b.tagline,
+               COALESCE(bk.location, b.location) AS location,
+               COALESCE(bk.phone, b.phone) AS phone,
+               COALESCE(bk.colors, b.brand_colors) AS colors,
                COALESCE(bk.font, 'Work Sans') AS font,
-               COALESCE(b.tone, bk.caption_tone, 'Premium') AS caption_tone,
-               COALESCE(b.logo_url, bk.logo_public_url) AS logo_public_url
+               COALESCE(bk.caption_tone, b.tone, 'Premium') AS caption_tone,
+               COALESCE(bk.logo_public_url, b.logo_url) AS logo_public_url
         FROM businesses b
         LEFT JOIN brand_kits bk ON bk.business_id = b.id
         WHERE b.id = ${business.id}
@@ -1247,12 +1429,8 @@ export const generatePosters = createServerFn({ method: "POST" })
       const website = passedBrand?.website || (business as any)?.website || "";
       const location = passedBrand?.location || brandRow?.location || "";
 
-      // Selected business logo (never mix logos from other businesses)
-      const logoUrl = passedBrand?.logo_url || brandRow?.logo_public_url || (
-        businessName.toLowerCase().includes("avero")
-          ? "https://dihikyljbrbidqgelwac.supabase.co/storage/v1/object/public/post-pilot/logos/7d7831d4-8c66-407b-acbc-a2060d66ff00/1792316942214-avero_logo_transparent.png"
-          : null
-      );
+      // Selected business logo: prioritize brand kit updated logo, passed brand logo, or business logo
+      const logoUrl = passedBrand?.logo_url || brandRow?.logo_public_url || null;
 
       const apiKey = getOpenAiApiKey();
       const options: PosterOption[] = [];
