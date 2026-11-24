@@ -288,6 +288,28 @@ Target Format & Aspect Ratio: "${format}" (${formatInstruction})${namedProduct ?
 
   if (apiKey) {
     try {
+      const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+        { type: "text", text: userPrompt },
+      ];
+
+      const refUrlForVision = opts.referenceImageUrl || templateObj?.referenceImageUrl;
+      if (refUrlForVision) {
+        try {
+          let imageUrlForVision = refUrlForVision;
+          if (refUrlForVision.startsWith("http")) {
+            const fetchRef = await fetch(refUrlForVision, { signal: AbortSignal.timeout(8000) });
+            if (fetchRef.ok) {
+              const buf = Buffer.from(await fetchRef.arrayBuffer());
+              imageUrlForVision = `data:image/png;base64,${buf.toString("base64")}`;
+            }
+          }
+          userContent.push({
+            type: "image_url",
+            image_url: { url: imageUrlForVision },
+          });
+        } catch {}
+      }
+
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -298,7 +320,7 @@ Target Format & Aspect Ratio: "${format}" (${formatInstruction})${namedProduct ?
           model,
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
+            { role: "user", content: userContent },
           ],
           response_format: { type: "json_object" },
           temperature: 0.6,
@@ -634,11 +656,9 @@ export async function generateFinishedFlyer(opts: {
     : rawModel;
 
   const rawQuality = process.env["OPENAI_IMAGE_QUALITY"]?.trim()?.toLowerCase();
-  const isHighRes = Boolean(
-    (opts.size && /2k|hd|ultra|high|1080/i.test(opts.size)) ||
-    rawQuality === "high"
-  );
-  const quality = isHighRes ? "high" : (rawQuality === "low" ? "low" : "medium");
+  const quality = (rawQuality === "low" || rawQuality === "medium") && !opts.size?.includes("2K")
+    ? rawQuality
+    : "high";
 
   // Map format & requested size to exact OpenAI image dimensions
   const format = opts.format || "Portrait 4:5";
@@ -796,62 +816,131 @@ CRITICAL TEXT INTEGRITY: Render ONLY the quoted text exactly as written. Ensure 
 
   log.ai("OpenAI", `Generating finished commercial flyer with ${model}`, { model, size, quality, format, category: opts.brief.category, hasLogo: Boolean(opts.logoUrl) });
 
-  // Direct edge-to-edge generation via OpenAI images/generations API
-  // Using images/generations guarantees full-bleed framing without outpainting letterboxing or black arch borders
-  const startTime = Date.now();
-  const genRes = await fetch("https://api.openai.com/v1/images/generations", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      prompt,
-      n: 1,
-      size,
-      quality,
-    }),
-    signal: AbortSignal.timeout(60_000),
-  });
-
-  let errText: string | null = null;
-  if (!genRes.ok) {
-    errText = await genRes.text();
-  }
-
-  await recordApiLog({
-    service: "openai",
-    endpoint: "https://api.openai.com/v1/images/generations",
-    method: "POST",
-    status: genRes.status,
-    durationMs: Date.now() - startTime,
-    hasError: !genRes.ok,
-    errorMessage: errText,
-    metadata: { model, size, quality },
-  });
-
-  if (!genRes.ok) {
-    log.ai("OpenAI", `HTTP ${genRes.status} Error from images/generations: ${(errText || "").slice(0, 200)}`);
-    throw new ExternalServiceError(`OpenAI image generation failed (${genRes.status}): ${(errText || "").slice(0, 100)}`);
-  }
-
-  const data = (await genRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
-  const item = data.data?.[0];
-  let previewUrl: string | null = null;
+  const refUrl = opts.referenceImageUrl || templateObj?.referenceImageUrl;
+  let usedEditsApi = false;
   let buffer: Buffer | null = null;
+  let previewUrl: string | null = null;
 
-  if (item?.b64_json) {
-    buffer = Buffer.from(item.b64_json, "base64");
-  } else if (item?.url) {
-    previewUrl = item.url;
+  const [wStr, hStr] = size.split("x");
+  const targetW = parseInt(wStr || "1024", 10);
+  const targetH = parseInt(hStr || "1280", 10);
+
+  // If a template reference image is provided, condition generation using images/edits
+  if (refUrl) {
     try {
-      const fetchRes = await fetch(item.url, { signal: AbortSignal.timeout(30_000) });
-      if (fetchRes.ok) {
-        buffer = Buffer.from(await fetchRes.arrayBuffer());
+      let refBuffer: Buffer | null = null;
+      if (refUrl.startsWith("data:")) {
+        const base64Data = refUrl.replace(/^data:image\/\w+;base64,/, "");
+        refBuffer = Buffer.from(base64Data, "base64");
+      } else {
+        const fetchRef = await fetch(refUrl, { signal: AbortSignal.timeout(15_000) });
+        if (fetchRef.ok) {
+          refBuffer = Buffer.from(await fetchRef.arrayBuffer());
+        }
       }
-    } catch (fetchErr) {
-      log.ai("OpenAI", `Could not fetch temporary OpenAI image url for R2 upload: ${fetchErr}`);
+
+      if (refBuffer) {
+        const { default: sharp } = await import("sharp");
+        // Pre-fit and crop the reference image to exact target canvas dimensions to prevent ANY black letterbox outpainting
+        const fittedRefBuffer = await sharp(refBuffer)
+          .resize(targetW, targetH, { fit: "cover", position: "center" })
+          .png()
+          .toBuffer();
+
+        const formData = new FormData();
+        formData.append("image", new Blob([fittedRefBuffer], { type: "image/png" }), "template-ref.png");
+        formData.append("model", model);
+        formData.append("prompt", prompt);
+        formData.append("size", size);
+        formData.append("quality", quality);
+
+        log.ai("OpenAI", `Conditioning flyer generation with template reference image via images/edits (${model})`, { size, quality, targetW, targetH });
+        const editRes = await fetch("https://api.openai.com/v1/images/edits", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}` },
+          body: formData,
+          signal: AbortSignal.timeout(60_000),
+        });
+
+        if (editRes.ok) {
+          const editData = (await editRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+          const editItem = editData.data?.[0];
+          if (editItem?.b64_json) {
+            buffer = Buffer.from(editItem.b64_json, "base64");
+            usedEditsApi = true;
+          } else if (editItem?.url) {
+            previewUrl = editItem.url;
+            const fetchRes = await fetch(editItem.url, { signal: AbortSignal.timeout(30_000) });
+            if (fetchRes.ok) {
+              buffer = Buffer.from(await fetchRes.arrayBuffer());
+              usedEditsApi = true;
+            }
+          }
+        } else {
+          const errText = await editRes.text();
+          log.ai("OpenAI", `images/edits non-200 (${editRes.status}): ${errText.slice(0, 150)}. Falling back to direct generation.`);
+        }
+      }
+    } catch (refErr) {
+      log.ai("OpenAI", `Template image conditioning error: ${refErr instanceof Error ? refErr.message : String(refErr)}. Falling back to direct generation.`);
+    }
+  }
+
+  // Fallback to direct edge-to-edge generation via OpenAI images/generations API if edits was not used or did not produce an image
+  if (!usedEditsApi || !buffer) {
+    const startTime = Date.now();
+    const genRes = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        prompt,
+        n: 1,
+        size,
+        quality,
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+
+    let errText: string | null = null;
+    if (!genRes.ok) {
+      errText = await genRes.text();
+    }
+
+    await recordApiLog({
+      service: "openai",
+      endpoint: "https://api.openai.com/v1/images/generations",
+      method: "POST",
+      status: genRes.status,
+      durationMs: Date.now() - startTime,
+      hasError: !genRes.ok,
+      errorMessage: errText,
+      metadata: { model, size, quality },
+    });
+
+    if (!genRes.ok) {
+      log.ai("OpenAI", `HTTP ${genRes.status} Error from images/generations: ${(errText || "").slice(0, 200)}`);
+      throw new ExternalServiceError(`OpenAI image generation failed (${genRes.status}): ${(errText || "").slice(0, 100)}`);
+    }
+
+    const data = (await genRes.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+    const item = data.data?.[0];
+
+    if (item?.b64_json) {
+      buffer = Buffer.from(item.b64_json, "base64");
+    } else if (item?.url) {
+      previewUrl = item.url;
+      try {
+        const fetchRes = await fetch(item.url, { signal: AbortSignal.timeout(30_000) });
+        if (fetchRes.ok) {
+          buffer = Buffer.from(await fetchRes.arrayBuffer());
+        }
+      } catch (fetchErr) {
+        log.ai("OpenAI", `Could not fetch temporary OpenAI image url for R2 upload: ${fetchErr}`);
+      }
     }
   }
 
