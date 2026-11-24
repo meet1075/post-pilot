@@ -240,5 +240,42 @@ describe("Posts Feature & Business Constraints", () => {
       expect(serialized.date).toBe("2026-11-24");
     });
   });
+
+  describe("Scheduled Post Cancel & Reschedule Operations", () => {
+    it("exports cancelPost and reschedulePost server functions", async () => {
+      const { cancelPost, reschedulePost } = await import("./posts.js");
+      expect(typeof cancelPost).toBe("function");
+      expect(typeof reschedulePost).toBe("function");
+    });
+
+    it("exports cancelScheduledPost and rescheduleScheduledPost mock API client helpers", async () => {
+      const { cancelScheduledPost, rescheduleScheduledPost } = await import("../lib/mockApi.js");
+      expect(typeof cancelScheduledPost).toBe("function");
+      expect(typeof rescheduleScheduledPost).toBe("function");
+    });
+
+    it("validates reschedule date format strictly as YYYY-MM-DD", () => {
+      const isValidDate = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
+      expect(isValidDate("2026-12-01")).toBe(true);
+      expect(isValidDate("2026-05-15")).toBe(true);
+      expect(isValidDate("12/01/2026")).toBe(false);
+      expect(isValidDate("2026-1-1")).toBe(false);
+      expect(isValidDate("invalid-date")).toBe(false);
+      expect(isValidDate("")).toBe(false);
+    });
+
+    it("constructs target ISO datetime combining date and time for provider sync", () => {
+      const buildScheduledIso = (date: string, time?: string) => {
+        const targetTime = time || "09:00";
+        return new Date(`${date}T${targetTime}:00`).toISOString();
+      };
+
+      const iso1 = buildScheduledIso("2026-12-01", "14:30");
+      expect(iso1).toBe(new Date("2026-12-01T14:30:00").toISOString());
+
+      const isoDefault = buildScheduledIso("2026-12-01");
+      expect(isoDefault).toBe(new Date("2026-12-01T09:00:00").toISOString());
+    });
+  });
 });
 

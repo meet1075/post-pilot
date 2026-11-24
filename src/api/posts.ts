@@ -402,11 +402,156 @@ export const deletePost = createServerFn({ method: "POST" })
       if (!existing) throw new NotFoundError("Post");
       await assertUserOwnsBusiness(session.userId, existing.business_id);
 
+      // If this post was scheduled with Zernio, cancel the external schedule
+      if (existing.zernio_post_id && existing.status === "Scheduled") {
+        try {
+          const { callZernioCancel } = await import("./publish.js");
+          await callZernioCancel({
+            zernioPostId: existing.zernio_post_id,
+            businessId: existing.business_id,
+          });
+        } catch (zernioErr) {
+          log.publish(existing.platform, `Warning: Zernio cancellation call failed during deletePost: ${zernioErr instanceof Error ? zernioErr.message : String(zernioErr)}`);
+        }
+      }
+
       await query`
         UPDATE posts SET deleted_at = now() WHERE id = ${id}
       `;
 
       return apiSuccess({ id }, "Post deleted successfully");
+    } catch (err) {
+      return errorToResponse(err);
+    }
+  });
+
+// ─── cancelPost ───────────────────────────────────────────────────────────────
+
+export const cancelPost = createServerFn({ method: "POST" })
+  .validator((d: { id: string }) => d)
+  .handler(async ({ data }) => {
+    try {
+      const session = await requireAuth();
+      const ip = getClientIp();
+      await checkRateLimit(ip, "general");
+
+      const { id } = data;
+      if (!uuidSchema.safeParse(id).success) throw new NotFoundError("Post");
+
+      const existing = await queryOne<PostRow>`
+        SELECT * FROM posts WHERE id = ${id} AND deleted_at IS NULL
+      `;
+      if (!existing) throw new NotFoundError("Post");
+      await assertUserOwnsBusiness(session.userId, existing.business_id);
+
+      // 1. Cancel in Zernio if scheduled with external provider
+      if (existing.zernio_post_id) {
+        try {
+          const { callZernioCancel } = await import("./publish.js");
+          await callZernioCancel({
+            zernioPostId: existing.zernio_post_id,
+            businessId: existing.business_id,
+          });
+        } catch (zernioErr) {
+          log.publish(existing.platform, `Warning: Zernio cancellation call failed: ${zernioErr instanceof Error ? zernioErr.message : String(zernioErr)}`);
+        }
+      }
+
+      // 2. Update database record: status = 'Cancelled'
+      const [updated] = await query<PostRow>`
+        UPDATE posts
+        SET status = 'Cancelled', updated_at = now()
+        WHERE id = ${id}
+        RETURNING *
+      `;
+
+      // 3. Record audit log
+      await query`
+        INSERT INTO audit_log (user_id, business_id, action, resource_type, resource_id, metadata)
+        VALUES (
+          ${session.userId},
+          ${existing.business_id},
+          'post.cancelled',
+          'post',
+          ${id}::uuid,
+          ${JSON.stringify({ zernioPostId: existing.zernio_post_id, headline: existing.headline })}::jsonb
+        )
+      `.catch(() => {});
+
+      log.db("Neon", "Scheduled post cancelled in database", { id, businessId: existing.business_id });
+
+      return apiSuccess({ id, post: updated ? serializePostRow(updated) : null }, "Scheduled post cancelled successfully");
+    } catch (err) {
+      return errorToResponse(err);
+    }
+  });
+
+// ─── reschedulePost ─────────────────────────────────────────────────────────
+
+export const reschedulePost = createServerFn({ method: "POST" })
+  .validator((d: { id: string; date: string; time?: string | undefined }) => d)
+  .handler(async ({ data }) => {
+    try {
+      const session = await requireAuth();
+      const ip = getClientIp();
+      await checkRateLimit(ip, "general");
+
+      const { id, date, time } = data;
+      if (!uuidSchema.safeParse(id).success) throw new NotFoundError("Post");
+      if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        throw new ValidationError("Invalid date format. Expected YYYY-MM-DD.");
+      }
+
+      const existing = await queryOne<PostRow>`
+        SELECT * FROM posts WHERE id = ${id} AND deleted_at IS NULL
+      `;
+      if (!existing) throw new NotFoundError("Post");
+      await assertUserOwnsBusiness(session.userId, existing.business_id);
+
+      const targetTime = time || existing.time || "09:00";
+      const scheduledAtIso = new Date(`${date}T${targetTime}:00`).toISOString();
+
+      // 1. Reschedule in Zernio if scheduled with external provider
+      if (existing.zernio_post_id) {
+        try {
+          const { callZernioReschedule } = await import("./publish.js");
+          await callZernioReschedule({
+            zernioPostId: existing.zernio_post_id,
+            scheduledAtIso,
+            businessId: existing.business_id,
+          });
+        } catch (zernioErr) {
+          log.publish(existing.platform, `Warning: Zernio reschedule call failed: ${zernioErr instanceof Error ? zernioErr.message : String(zernioErr)}`);
+        }
+      }
+
+      // 2. Update database record: date, time, status = 'Scheduled'
+      const [updated] = await query<PostRow>`
+        UPDATE posts
+        SET date = ${date},
+            time = ${targetTime},
+            status = 'Scheduled',
+            updated_at = now()
+        WHERE id = ${id}
+        RETURNING *
+      `;
+
+      // 3. Record audit log
+      await query`
+        INSERT INTO audit_log (user_id, business_id, action, resource_type, resource_id, metadata)
+        VALUES (
+          ${session.userId},
+          ${existing.business_id},
+          'post.rescheduled',
+          'post',
+          ${id}::uuid,
+          ${JSON.stringify({ date, time: targetTime, scheduledAtIso, zernioPostId: existing.zernio_post_id })}::jsonb
+        )
+      `.catch(() => {});
+
+      log.db("Neon", "Scheduled post rescheduled in database", { id, date, time: targetTime });
+
+      return apiSuccess({ post: updated ? serializePostRow(updated) : null }, "Scheduled post rescheduled successfully");
     } catch (err) {
       return errorToResponse(err);
     }

@@ -87,5 +87,26 @@ describe("Publish & Schedule Feature", () => {
       expect(checkScheduleRequirements("schedule", undefined, "12:00")).toBe(false);
     });
   });
+
+  describe("Zernio Cancel & Reschedule Operations", () => {
+    it("simulates Zernio post cancellation when ZERNIO_API_KEY is not configured", async () => {
+      const { callZernioCancel } = await import("./publish.js");
+      const result = await callZernioCancel({
+        zernioPostId: "zernio_post_123",
+        businessId: "biz-1",
+      });
+      expect(result).toBe(true);
+    });
+
+    it("simulates Zernio post rescheduling when ZERNIO_API_KEY is not configured", async () => {
+      const { callZernioReschedule } = await import("./publish.js");
+      const result = await callZernioReschedule({
+        zernioPostId: "zernio_post_123",
+        scheduledAtIso: "2026-12-01T14:00:00.000Z",
+        businessId: "biz-1",
+      });
+      expect(result).toBe(true);
+    });
+  });
 });
 

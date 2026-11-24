@@ -19,6 +19,7 @@ export interface SocialPost {
   theme: string;
   price: string;
   imageUrl?: string | undefined;
+  zernioPostId?: string | null | undefined;
 }
 
 export interface PosterOption {
@@ -489,6 +490,40 @@ export async function publishPost(post: SocialPost): Promise<SocialPost> {
 
   await wait(450);
   return { ...post, id: `post-${Date.now()}`, status: chosenStatus };
+}
+
+/**
+ * Cancels a scheduled post: updates DB status to 'Cancelled' and removes from Zernio queue.
+ */
+export async function cancelScheduledPost(postId: string): Promise<boolean> {
+  try {
+    const { cancelPost } = await import("@/api/posts");
+    const res = await cancelPost({ data: { id: postId } });
+    return Boolean(res?.success);
+  } catch (err) {
+    console.warn("[cancelScheduledPost] Server cancel failed:", err);
+    return false;
+  }
+}
+
+/**
+ * Reschedules a scheduled post: updates scheduled date/time in Neon DB and updates Zernio queue.
+ */
+export async function rescheduleScheduledPost(
+  postId: string,
+  newDate: string,
+  newTime?: string
+): Promise<boolean> {
+  try {
+    const { reschedulePost } = await import("@/api/posts");
+    const res = await reschedulePost({
+      data: { id: postId, date: newDate, ...(newTime ? { time: newTime } : {}) },
+    });
+    return Boolean(res?.success);
+  } catch (err) {
+    console.warn("[rescheduleScheduledPost] Server reschedule failed:", err);
+    return false;
+  }
 }
 
 // ─── Audit & API Logs Client Wrappers ────────────────────────────────────────

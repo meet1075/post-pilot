@@ -101,7 +101,7 @@ import {
 import { DIYA_LOGO_URL } from "@/lib/branding";
 import { TemplatesView } from "@/components/TemplatesView";
 import { TEMPLATES, getTemplateById, type TemplateItem } from "@/lib/templates";
-import { getGeoCountries, getGeoStates, getGeoCities, getGeoAreas, generateLocationHashtags } from "@/lib/geoHashtags";
+import { getGeoCountries, getGeoStates, getGeoCities, getGeoAreas, generateLocationHashtags, type GeoCity } from "@/lib/geoHashtags";
 import { searchLocationsLive, fetchLiveCitiesByState, type GeoLocationItem } from "@/lib/geoApiService";
 
 type Page = "Home" | "Create" | "Templates" | "Scheduled" | "Posted" | "Brand kit" | "Accounts" | "Settings";
@@ -511,6 +511,7 @@ function PostPilot() {
               socialAccountId: p.social_account_id ?? undefined,
               headline: p.headline,
               caption: p.caption,
+              location: p.location ?? undefined,
               date: dateStr,
               time: p.time ? String(p.time).slice(0, 5) : "",
               status: (p.status === "Failed" ? "Draft" : p.status) as PostStatus,
@@ -518,6 +519,7 @@ function PostPilot() {
               theme: p.theme || "tomato",
               price: p.price || "",
               imageUrl: p.image_url ?? undefined,
+              zernioPostId: p.zernio_post_id ?? undefined,
             };
           });
           setPosts(newPosts);
@@ -1105,8 +1107,8 @@ function PostPilot() {
                 onSwitchBusiness={handleSwitchBusiness}
                 onOpenAddBusiness={() => setAddBusinessModalOpen(true)}
                 onPublished={(post) => {
-                  const safeDate = post.date instanceof Date
-                    ? post.date.toISOString().slice(0, 10)
+                  const safeDate = (post.date as any) instanceof Date
+                    ? (post.date as any).toISOString().slice(0, 10)
                     : (post.date ? String(post.date).slice(0, 10) : "");
                   const cleanPost = {
                     ...post,
@@ -1178,10 +1180,10 @@ function PostPilot() {
                               tagline: updated.tagline,
                               location: updated.location,
                               phone: updated.phone,
-                              website: updated.website,
-                              email: updated.email,
+                              website: updated.website || "",
+                              email: updated.email || "",
                               brand_colors: updated.colors,
-                              logo_url: updated.logoUrl,
+                              logo_url: updated.logoUrl ?? null,
                             }
                           : b
                       );
@@ -1579,7 +1581,7 @@ function Dashboard({
     return posts.filter((post) => {
       if (post.status !== "Posted") return false;
       if (!post.date) return false;
-      const dateStr = post.date instanceof Date ? post.date.toISOString().slice(0, 10) : String(post.date);
+      const dateStr = (post.date as any) instanceof Date ? (post.date as any).toISOString().slice(0, 10) : String(post.date);
       const match = dateStr.match(/^(\d{4})-(\d{2})/);
       if (match && match[1] && match[2]) {
         const postYear = parseInt(match[1], 10);
@@ -4388,7 +4390,7 @@ function PublishStep({
     const currentCountryObj = geoCountries.find((c) => c.id === geoCountry);
     const timer = setTimeout(() => {
       setIsSearchingLive(true);
-      searchLocationsLive(query, { countryCode: currentCountryObj?.code })
+      searchLocationsLive(query, currentCountryObj?.code ? { countryCode: currentCountryObj.code } : undefined)
         .then((items) => {
           setLiveLocationSearchResults(items);
         })
@@ -4453,7 +4455,7 @@ function PublishStep({
     return generateLocationHashtags({
       countryId: geoCountry,
       stateCode: geoState !== "all" ? geoState : undefined,
-      cityId: geoCity,
+      cityId: geoCity || undefined,
       areaId: geoArea || undefined,
       customLocation: postLocation,
     });
@@ -5425,14 +5427,36 @@ function ScheduledPage({
   const [view, setView] = useState<"list" | "calendar">("list");
   const [month, setMonth] = useState(() => new Date());
   const scheduled = posts.filter((post) => post.status === "Scheduled").sort((a, b) => {
-    const aDate = a.date instanceof Date ? a.date.toISOString().slice(0, 10) : String(a.date || "");
-    const bDate = b.date instanceof Date ? b.date.toISOString().slice(0, 10) : String(b.date || "");
+    const aDate = (a.date as any) instanceof Date ? (a.date as any).toISOString().slice(0, 10) : String(a.date || "");
+    const bDate = (b.date as any) instanceof Date ? (b.date as any).toISOString().slice(0, 10) : String(b.date || "");
     return `${aDate} ${a.time || ""}`.localeCompare(`${bDate} ${b.time || ""}`);
   });
   const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
   const firstDay = new Date(month.getFullYear(), month.getMonth(), 1).getDay();
   const monthLabel = month.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const shiftMonth = (amount: number) => setMonth(new Date(month.getFullYear(), month.getMonth() + amount, 1));
+
+  const handleCancelPost = async (post: SocialPost) => {
+    try {
+      const { cancelPost } = await import("@/api/posts");
+      await cancelPost({ data: { id: post.id } });
+    } catch (err) {
+      console.warn("[ScheduledPage] cancelPost server error:", err);
+    }
+    onChange(posts.filter((item) => item.id !== post.id));
+    toast.success("Scheduled post cancelled");
+  };
+
+  const handleReschedulePost = async (post: SocialPost, nextDate: string) => {
+    try {
+      const { reschedulePost } = await import("@/api/posts");
+      await reschedulePost({ data: { id: post.id, date: nextDate, time: post.time } });
+    } catch (err) {
+      console.warn("[ScheduledPage] reschedulePost server error:", err);
+    }
+    onChange(posts.map((item) => (item.id === post.id ? { ...item, date: nextDate } : item)));
+    toast.success("Post rescheduled");
+  };
 
   return (
     <>
@@ -5491,8 +5515,8 @@ function ScheduledPage({
                 key={post.id}
                 post={post}
                 businessName={businessName}
-                onReschedule={(nextDate) => onChange(posts.map((item) => item.id === post.id ? { ...item, date: nextDate } : item))}
-                onCancel={() => { onChange(posts.filter((item) => item.id !== post.id)); toast.success("Scheduled post cancelled"); }}
+                onReschedule={(nextDate) => handleReschedulePost(post, nextDate)}
+                onCancel={() => handleCancelPost(post)}
                 onSelectPost={onSelectPost}
               />
             ))
@@ -5508,7 +5532,7 @@ function ScheduledPage({
           {Array.from({ length: firstDay + daysInMonth }, (_, index) => {
             const day = index - firstDay + 1;
             const matches = scheduled.filter((post) => {
-              const dStr = post.date instanceof Date ? post.date.toISOString().slice(0, 10) : String(post.date || "");
+              const dStr = (post.date as any) instanceof Date ? (post.date as any).toISOString().slice(0, 10) : String(post.date || "");
               return (
                 Number(dStr.slice(-2)) === day &&
                 Number(dStr.slice(5, 7)) === month.getMonth() + 1 &&
@@ -5545,12 +5569,13 @@ function ScheduledRow({
 }: {
   post: SocialPost;
   businessName: string;
-  onReschedule: (date: string) => void;
-  onCancel: () => void;
+  onReschedule: (date: string) => void | Promise<void>;
+  onCancel: () => void | Promise<void>;
   onSelectPost?: ((post: SocialPost) => void) | undefined;
 }) {
   const [editing, setEditing] = useState(false);
   const [date, setDate] = useState(post.date);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const displayDate = formatPostDate(post.date, post.time);
 
   return (
@@ -5603,8 +5628,21 @@ function ScheduledRow({
         <Button variant="outline" size="sm" className="h-9 rounded-xl text-xs" onClick={() => setEditing(!editing)}>
           {editing ? "Close" : "Reschedule"}
         </Button>
-        <Button variant="ghost" size="sm" className="h-9 rounded-xl text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onCancel}>
-          Cancel
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-9 rounded-xl text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+          disabled={isSubmitting}
+          onClick={async () => {
+            setIsSubmitting(true);
+            try {
+              await onCancel();
+            } finally {
+              setIsSubmitting(false);
+            }
+          }}
+        >
+          {isSubmitting ? "Cancelling..." : "Cancel"}
         </Button>
       </div>
       {editing && (
@@ -5616,8 +5654,21 @@ function ScheduledRow({
             New scheduled date
             <Input className="mt-1.5 h-9 rounded-xl" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           </label>
-          <Button size="sm" className="h-9 rounded-xl" onClick={() => { onReschedule(date); setEditing(false); toast.success("Post rescheduled"); }}>
-            Save date
+          <Button
+            size="sm"
+            className="h-9 rounded-xl"
+            disabled={isSubmitting}
+            onClick={async () => {
+              setIsSubmitting(true);
+              try {
+                await onReschedule(date);
+                setEditing(false);
+              } finally {
+                setIsSubmitting(false);
+              }
+            }}
+          >
+            {isSubmitting ? "Saving..." : "Save date"}
           </Button>
         </div>
       )}

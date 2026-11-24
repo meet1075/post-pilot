@@ -476,3 +476,136 @@ async function fetchZernioStatus(zernioPostId: string): Promise<string | null> {
     return null;
   }
 }
+
+/**
+ * Cancels a scheduled post on Zernio using its external API endpoint.
+ * Deleting a scheduled post in Zernio stops any pending publishing.
+ */
+export async function callZernioCancel(opts: {
+  zernioPostId: string;
+  businessId: string;
+}): Promise<boolean> {
+  const apiKey = process.env["ZERNIO_API_KEY"];
+  const baseUrl = process.env["ZERNIO_BASE_URL"] ?? "https://api.zernio.com/v1";
+
+  if (!apiKey) {
+    log.publish("Multi", `[callZernioCancel] ZERNIO_API_KEY not configured — simulating cancel for post ${opts.zernioPostId}`);
+    return true;
+  }
+
+  const startTime = Date.now();
+  try {
+    const response = await fetch(`${baseUrl}/posts/${opts.zernioPostId}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    let errText: string | null = null;
+    if (!response.ok && response.status !== 404) {
+      errText = await response.text().catch(() => "");
+    }
+
+    await recordApiLog({
+      businessId: opts.businessId,
+      service: "zernio",
+      endpoint: `${baseUrl}/posts/${opts.zernioPostId}`,
+      method: "DELETE",
+      status: response.status,
+      durationMs: Date.now() - startTime,
+      hasError: !response.ok && response.status !== 404,
+      errorMessage: errText,
+      metadata: { zernioPostId: opts.zernioPostId, action: "cancel" },
+    });
+
+    log.publish("Multi", `Zernio cancel request returned status ${response.status}`, { zernioPostId: opts.zernioPostId });
+    return response.ok || response.status === 404;
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    log.publish("Multi", `Failed to cancel post in Zernio: ${errMsg}`, { zernioPostId: opts.zernioPostId });
+    await recordApiLog({
+      businessId: opts.businessId,
+      service: "zernio",
+      endpoint: `${baseUrl}/posts/${opts.zernioPostId}`,
+      method: "DELETE",
+      status: 500,
+      durationMs: Date.now() - startTime,
+      hasError: true,
+      errorMessage: errMsg,
+      metadata: { zernioPostId: opts.zernioPostId, action: "cancel" },
+    });
+    return false;
+  }
+}
+
+/**
+ * Reschedules an existing post on Zernio with a new scheduled datetime.
+ */
+export async function callZernioReschedule(opts: {
+  zernioPostId: string;
+  scheduledAtIso: string;
+  businessId: string;
+}): Promise<boolean> {
+  const apiKey = process.env["ZERNIO_API_KEY"];
+  const baseUrl = process.env["ZERNIO_BASE_URL"] ?? "https://api.zernio.com/v1";
+
+  if (!apiKey) {
+    log.publish("Multi", `[callZernioReschedule] ZERNIO_API_KEY not configured — simulating reschedule for post ${opts.zernioPostId}`);
+    return true;
+  }
+
+  const startTime = Date.now();
+  const body = {
+    scheduledFor: opts.scheduledAtIso,
+    scheduledAt: opts.scheduledAtIso,
+  };
+
+  try {
+    const response = await fetch(`${baseUrl}/posts/${opts.zernioPostId}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    let errText: string | null = null;
+    if (!response.ok) {
+      errText = await response.text().catch(() => "");
+    }
+
+    await recordApiLog({
+      businessId: opts.businessId,
+      service: "zernio",
+      endpoint: `${baseUrl}/posts/${opts.zernioPostId}`,
+      method: "PUT",
+      status: response.status,
+      durationMs: Date.now() - startTime,
+      hasError: !response.ok,
+      errorMessage: errText,
+      metadata: { zernioPostId: opts.zernioPostId, action: "reschedule", scheduledAt: opts.scheduledAtIso },
+    });
+
+    log.publish("Multi", `Zernio reschedule request returned status ${response.status}`, { zernioPostId: opts.zernioPostId });
+    return response.ok;
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    log.publish("Multi", `Failed to reschedule post in Zernio: ${errMsg}`, { zernioPostId: opts.zernioPostId });
+    await recordApiLog({
+      businessId: opts.businessId,
+      service: "zernio",
+      endpoint: `${baseUrl}/posts/${opts.zernioPostId}`,
+      method: "PUT",
+      status: 500,
+      durationMs: Date.now() - startTime,
+      hasError: true,
+      errorMessage: errMsg,
+      metadata: { zernioPostId: opts.zernioPostId, action: "reschedule", scheduledAt: opts.scheduledAtIso },
+    });
+    return false;
+  }
+}

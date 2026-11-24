@@ -952,11 +952,11 @@ export function formatHashtag(tag: string): string {
  * Generate a comprehensive list of suggested hashtags based on selection
  */
 export function generateLocationHashtags(params: {
-  countryId?: string;
-  stateCode?: string;
-  cityId?: string;
-  areaId?: string;
-  customLocation?: string;
+  countryId?: string | undefined;
+  stateCode?: string | undefined;
+  cityId?: string | undefined;
+  areaId?: string | undefined;
+  customLocation?: string | undefined;
 }): string[] {
   const result = new Set<string>();
 
