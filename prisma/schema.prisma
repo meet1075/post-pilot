@@ -1,0 +1,327 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// USERS (PostPilot user table)
+// ============================================================
+model User {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email               String    @unique
+  emailVerified       Boolean   @default(false) @map("email_verified")
+  magicToken          String?   @map("magic_token")
+  magicTokenExpiresAt DateTime? @map("magic_token_expires_at") @db.Timestamptz
+  lastLoginAt         DateTime? @map("last_login_at") @db.Timestamptz
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([email], map: "idx_users_email")
+  @@map("users")
+}
+
+// ============================================================
+// BUSINESSES (Multi-workspace support)
+// ============================================================
+model Business {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId            String             @map("owner_id")
+  ownerUserId        String?            @map("owner_user_id")
+  name               String
+  tagline            String             @default("")
+  location           String             @default("")
+  phone              String             @default("")
+  website            String             @default("")
+  email              String             @default("")
+  timezone           String             @default("UTC")
+  businessType       String             @default("restaurant") @map("business_type")
+  logoUrl            String?            @map("logo_url")
+  brandColors        String[]           @default(["#00A896", "#028090", "#05668D", "#02C39A"]) @map("brand_colors")
+  tone               String             @default("Premium")
+  defaultHashtags    String             @default("") @map("default_hashtags")
+  zernioProfileId    String?            @map("zernio_profile_id")
+  isActive           Boolean            @default(true) @map("is_active")
+  deletedAt          DateTime?          @map("deleted_at") @db.Timestamptz
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  brandKit           BrandKit?
+  socialAccounts     SocialAccount[]
+  connectedAccounts  ConnectedAccount[]
+  posts              Post[]
+  posterGenerations  PosterGeneration[]
+  captionSuggestions CaptionSuggestion[]
+  auditLogs          AuditLog[]
+  apiLogs            ApiLog[]
+
+  @@index([ownerId], map: "idx_businesses_owner")
+  @@index([ownerUserId], map: "idx_businesses_owner_user")
+  @@map("businesses")
+}
+
+// ============================================================
+// BRAND KITS
+// ============================================================
+model BrandKit {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId      String    @unique @map("business_id") @db.Uuid
+  colors          String[]  @default(["Tomato"])
+  font            String    @default("Fraunces")
+  logoR2Key       String?   @map("logo_r2_key")
+  logoPublicUrl   String?   @map("logo_public_url")
+  captionTone     String    @default("Friendly") @map("caption_tone")
+  defaultHashtags String    @default("") @map("default_hashtags")
+  website         String    @default("")
+  email           String    @default("")
+  phone           String    @default("")
+  location        String    @default("")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@map("brand_kits")
+}
+
+// ============================================================
+// SOCIAL ACCOUNTS (Multi-account support per business)
+// ============================================================
+model SocialAccount {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId        String             @map("business_id") @db.Uuid
+  platform          String
+  externalAccountId String             @map("external_account_id")
+  username          String
+  status            String             @default("connected")
+  deletedAt         DateTime?          @map("deleted_at") @db.Timestamptz
+  connectedAt       DateTime           @default(now()) @map("connected_at") @db.Timestamptz
+  updatedAt         DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  business          Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  posts             Post[]
+  posterGenerations PosterGeneration[]
+
+  @@index([businessId], map: "idx_social_accounts_biz")
+  @@map("social_accounts")
+}
+
+// ============================================================
+// CONNECTED SOCIAL ACCOUNTS (Legacy mapping table)
+// ============================================================
+model ConnectedAccount {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId      String    @map("business_id") @db.Uuid
+  platform        String
+  platformUserId  String?   @map("platform_user_id")
+  platformHandle  String?   @map("platform_handle")
+  accessTokenEnc  String?   @map("access_token_enc")
+  tokenExpiresAt  DateTime? @map("token_expires_at") @db.Timestamptz
+  zernioAccountId String?   @map("zernio_account_id")
+  status          String    @default("connected")
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+  connectedAt     DateTime  @default(now()) @map("connected_at") @db.Timestamptz
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, platform])
+  @@index([businessId], map: "idx_connected_accounts_business")
+  @@map("connected_accounts")
+}
+
+// ============================================================
+// POSTS
+// ============================================================
+model Post {
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId         String              @map("business_id") @db.Uuid
+  socialAccountId    String?             @map("social_account_id") @db.Uuid
+  headline           String              @default("")
+  caption            String              @default("")
+  prompt             String              @default("")
+  date               DateTime?           @db.Date
+  time               String?
+  status             String              @default("Draft")
+  platform           String              @default("Instagram")
+  theme              String              @default("tomato")
+  price              String              @default("")
+  location           String?             @default("")
+  imageUrl           String?             @map("image_url")
+  imageR2Key         String?             @map("image_r2_key")
+  zernioPostId       String?             @map("zernio_post_id")
+  publishedAt        DateTime?           @map("published_at") @db.Timestamptz
+  errorMessage       String?             @map("error_message")
+  deletedAt          DateTime?           @map("deleted_at") @db.Timestamptz
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  business           Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  socialAccount      SocialAccount?      @relation(fields: [socialAccountId], references: [id], onDelete: SetNull)
+  posterGenerations  PosterGeneration[]
+  captionSuggestions CaptionSuggestion[]
+
+  @@index([businessId], map: "idx_posts_business")
+  @@index([businessId, status], map: "idx_posts_business_status")
+  @@index([socialAccountId], map: "idx_posts_social_account")
+  @@map("posts")
+}
+
+// ============================================================
+// POSTER GENERATIONS
+// ============================================================
+model PosterGeneration {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  postId          String?        @map("post_id") @db.Uuid
+  businessId      String         @map("business_id") @db.Uuid
+  socialAccountId String?        @map("social_account_id") @db.Uuid
+  prompt          String
+  options         Json           @default("[]")
+  selected        Int?
+  costUsd         Decimal?       @map("cost_usd") @db.Decimal(10, 6)
+  modelUsed       String?        @map("model_used")
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  business        Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  socialAccount   SocialAccount? @relation(fields: [socialAccountId], references: [id], onDelete: SetNull)
+  post            Post?          @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@index([businessId], map: "idx_poster_gen_business")
+  @@index([postId], map: "idx_poster_gen_post")
+  @@map("poster_generations")
+}
+
+// ============================================================
+// CAPTION SUGGESTIONS
+// ============================================================
+model CaptionSuggestion {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  postId      String?   @map("post_id") @db.Uuid
+  businessId  String    @map("business_id") @db.Uuid
+  suggestions Json      @default("[]")
+  selected    String?
+  modelUsed   String?   @map("model_used")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  post        Post?     @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@index([postId], map: "idx_caption_suggestions_post")
+  @@map("caption_suggestions")
+}
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+model AuditLog {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String?   @map("user_id")
+  businessId   String?   @map("business_id") @db.Uuid
+  action       String
+  resourceType String?   @map("resource_type")
+  resourceId   String?   @map("resource_id") @db.Uuid
+  metadata     Json?     @default("{}")
+  ipAddress    String?   @map("ip_address")
+  userAgent    String?   @map("user_agent")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  business     Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+
+  @@index([userId], map: "idx_audit_user")
+  @@index([businessId], map: "idx_audit_business")
+  @@map("audit_log")
+}
+
+// ============================================================
+// API LOG (Telemetry & Observability)
+// ============================================================
+model ApiLog {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessId   String?   @map("business_id") @db.Uuid
+  service      String
+  endpoint     String
+  method       String    @default("POST")
+  status       Int       @default(200) @db.SmallInt
+  durationMs   Int       @default(0) @map("duration_ms")
+  hasError     Boolean   @default(false) @map("has_error")
+  errorMessage String?   @map("error_message")
+  metadata     Json?     @default("{}")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  business     Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, createdAt(sort: Desc)], map: "idx_api_log_business_ts")
+  @@index([hasError, createdAt(sort: Desc)], map: "idx_api_log_errors")
+  @@index([createdAt(sort: Desc)], map: "idx_api_log_ts")
+  @@map("api_log")
+}
+
+// ============================================================
+// BETTER AUTH TABLES (Google OAuth & Session Management)
+// ============================================================
+model BetterUser {
+  id            String          @id
+  name          String
+  email         String          @unique
+  emailVerified Boolean         @map("emailVerified")
+  image         String?
+  createdAt     DateTime        @default(now()) @map("createdAt")
+  updatedAt     DateTime        @updatedAt @map("updatedAt")
+
+  sessions      BetterSession[]
+  accounts      BetterAccount[]
+
+  @@map("user")
+}
+
+model BetterSession {
+  id        String     @id
+  expiresAt DateTime   @map("expiresAt")
+  token     String     @unique
+  createdAt DateTime   @default(now()) @map("createdAt")
+  updatedAt DateTime   @updatedAt @map("updatedAt")
+  ipAddress String?    @map("ipAddress")
+  userAgent String?    @map("userAgent")
+  userId    String     @map("userId")
+
+  user      BetterUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+model BetterAccount {
+  id                    String      @id
+  accountId             String      @map("accountId")
+  providerId            String      @map("providerId")
+  userId                String      @map("userId")
+  accessToken           String?     @map("accessToken")
+  refreshToken          String?     @map("refreshToken")
+  idToken               String?     @map("idToken")
+  accessTokenExpiresAt  DateTime?   @map("accessTokenExpiresAt")
+  refreshTokenExpiresAt DateTime?   @map("refreshTokenExpiresAt")
+  scope                 String?
+  password              String?
+  createdAt             DateTime    @default(now()) @map("createdAt")
+  updatedAt             DateTime    @updatedAt @map("updatedAt")
+
+  user                  BetterUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("account")
+}
+
+model BetterVerification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime @map("expiresAt")
+  createdAt  DateTime @default(now()) @map("createdAt")
+  updatedAt  DateTime @updatedAt @map("updatedAt")
+
+  @@map("verification")
+}

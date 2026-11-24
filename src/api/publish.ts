@@ -77,6 +77,23 @@ export const publishPost = createServerFn({ method: "POST" })
             { field: "scheduled_time", message: "Scheduled time must be in the future" },
           ]);
         }
+
+        // Enforce maximum 10 scheduled posts per business workspace
+        const [scheduledCountRow] = await query<{ count: string }>`
+          SELECT COUNT(*)::text AS count
+          FROM posts
+          WHERE business_id = ${session.businessId}
+            AND status = 'Scheduled'
+            AND id != ${post_id}
+            AND deleted_at IS NULL
+        `;
+        const currentScheduledCount = parseInt(scheduledCountRow?.count || "0", 10);
+        if (currentScheduledCount >= 10) {
+          throw new ValidationError(
+            "Schedule limit reached: You can have a maximum of 10 active scheduled posts at a time. Please wait for an existing scheduled post to publish or delete one before scheduling more.",
+            [{ field: "timing", message: "Maximum 10 scheduled posts allowed" }]
+          );
+        }
       }
 
       // Fetch the post

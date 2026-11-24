@@ -30,6 +30,10 @@ interface BrandKitRow {
   logo_public_url: string | null;
   caption_tone: string;
   default_hashtags: string;
+  website?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  location?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -107,13 +111,18 @@ export const updateBrandKit = createServerFn({ method: "POST" })
 
       // Upsert brand kit
       const [kit] = await query<BrandKitRow>`
-        INSERT INTO brand_kits (business_id, colors, font, caption_tone, default_hashtags)
+        INSERT INTO brand_kits (business_id, colors, font, caption_tone, default_hashtags, website, email, phone, location, logo_public_url)
         VALUES (
           ${targetBusinessId},
           ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(d.colors && d.colors.length > 0 ? d.colors : ["Tomato", "Olive"])}::jsonb)),
           ${d.font ?? "Fraunces"},
           ${d.caption_tone ?? "Friendly"},
-          ${d.default_hashtags ?? ""}
+          ${d.default_hashtags ?? ""},
+          ${d.website ?? ""},
+          ${d.email ?? ""},
+          ${d.phone ?? ""},
+          ${d.location ?? ""},
+          ${d.logo_public_url ?? null}
         )
         ON CONFLICT (business_id) DO UPDATE SET
           colors           = CASE
@@ -124,6 +133,11 @@ export const updateBrandKit = createServerFn({ method: "POST" })
           font             = COALESCE(${d.font ?? null}, brand_kits.font),
           caption_tone     = COALESCE(${d.caption_tone ?? null}, brand_kits.caption_tone),
           default_hashtags = COALESCE(${d.default_hashtags ?? null}, brand_kits.default_hashtags),
+          website          = COALESCE(${d.website ?? null}, brand_kits.website),
+          email            = COALESCE(${d.email ?? null}, brand_kits.email),
+          phone            = COALESCE(${d.phone ?? null}, brand_kits.phone),
+          location         = COALESCE(${d.location ?? null}, brand_kits.location),
+          logo_public_url  = COALESCE(${d.logo_public_url ?? null}, brand_kits.logo_public_url),
           updated_at       = now()
         RETURNING *
       `;
@@ -138,6 +152,11 @@ export const updateBrandKit = createServerFn({ method: "POST" })
                              END,
           tone             = COALESCE(${d.caption_tone ?? null}, tone),
           default_hashtags = COALESCE(${d.default_hashtags ?? null}, default_hashtags),
+          website          = COALESCE(${d.website ?? null}, website),
+          email            = COALESCE(${d.email ?? null}, email),
+          phone            = COALESCE(${d.phone ?? null}, phone),
+          location         = COALESCE(${d.location ?? null}, location),
+          logo_url         = COALESCE(${d.logo_public_url ?? null}, logo_url),
           updated_at       = now()
         WHERE id = ${targetBusinessId}
       `;

@@ -40,3 +40,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+/src/generated/prisma
+
+# Generated images and media (persisted in Cloudflare R2 bucket, never in git repo)
+public/templates/
+public/showcase/
+*.pdf
+page_preview-*.png

@@ -39,6 +39,7 @@ export interface PostRow {
   platform: "Instagram" | "Facebook" | "X";
   theme: string;
   price: string;
+  location: string | null;
   image_url: string | null;
   image_r2_key: string | null;
   zernio_post_id: string | null;
@@ -46,6 +47,25 @@ export interface PostRow {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Normalizes DB PostRow fields, guaranteeing `date` is always a strict string (YYYY-MM-DD)
+ * to avoid any client-side runtime errors such as `post.date.match is not a function`.
+ */
+export function serializePostRow(row: PostRow): PostRow {
+  let dateStr: string | null = null;
+  if (row.date) {
+    if ((row.date as any) instanceof Date) {
+      dateStr = (row.date as any).toISOString().slice(0, 10);
+    } else {
+      dateStr = String(row.date).slice(0, 10);
+    }
+  }
+  return {
+    ...row,
+    date: dateStr,
+  };
 }
 
 // ─── getPosts ─────────────────────────────────────────────────────────────────
@@ -81,7 +101,7 @@ export const getPosts = createServerFn({ method: "GET" })
               id, business_id, social_account_id, headline, caption,
               date::text as date,
               time::text as time,
-              status, platform, theme, price, image_url,
+              status, platform, theme, price, location, image_url,
               zernio_post_id, published_at, error_message,
               created_at, updated_at
             FROM posts
@@ -97,7 +117,7 @@ export const getPosts = createServerFn({ method: "GET" })
               id, business_id, social_account_id, headline, caption,
               date::text as date,
               time::text as time,
-              status, platform, theme, price, image_url,
+              status, platform, theme, price, location, image_url,
               zernio_post_id, published_at, error_message,
               created_at, updated_at
             FROM posts
@@ -130,7 +150,7 @@ export const getPosts = createServerFn({ method: "GET" })
 
       log.db("Neon", "Loaded posts from database", { count: posts.length, filter: status || "all", businessId: targetBusinessId });
 
-      return apiSuccess({ posts }, "Posts retrieved successfully");
+      return apiSuccess({ posts: posts.map(serializePostRow) }, "Posts retrieved successfully");
     } catch (err) {
       return errorToResponse(err);
     }
@@ -160,7 +180,7 @@ export const getPost = createServerFn({ method: "GET" })
       // Assert ownership of the business this post belongs to
       await assertUserOwnsBusiness(session.userId, post.business_id);
 
-      return apiSuccess({ post }, "Post retrieved successfully");
+      return apiSuccess({ post: serializePostRow(post) }, "Post retrieved successfully");
     } catch (err) {
       return errorToResponse(err);
     }
@@ -188,6 +208,24 @@ export const createPost = createServerFn({ method: "POST" })
 
       // Enforce ownership
       await assertUserOwnsBusiness(session.userId, targetBusinessId);
+
+      // Enforce maximum 10 scheduled posts per business workspace
+      if (d.status === "Scheduled") {
+        const [scheduledCountRow] = await query<{ count: string }>`
+          SELECT COUNT(*)::text AS count
+          FROM posts
+          WHERE business_id = ${targetBusinessId}
+            AND status = 'Scheduled'
+            AND deleted_at IS NULL
+        `;
+        const currentScheduledCount = parseInt(scheduledCountRow?.count || "0", 10);
+        if (currentScheduledCount >= 10) {
+          throw new ValidationError(
+            "Schedule limit reached: You can have a maximum of 10 active scheduled posts at a time. Please wait for an existing scheduled post to publish or delete one to schedule more.",
+            [{ field: "status", message: "Maximum 10 scheduled posts allowed" }]
+          );
+        }
+      }
 
       let finalImageUrl = d.image_url ?? null;
       let r2Key: string | null = null;
@@ -242,7 +280,7 @@ export const createPost = createServerFn({ method: "POST" })
       const [post] = await query<PostRow>`
         INSERT INTO posts (
           business_id, social_account_id, headline, caption, prompt,
-          date, time, status, platform, theme, price, image_url, image_r2_key
+          date, time, status, platform, theme, price, location, image_url, image_r2_key
         ) VALUES (
           ${targetBusinessId},
           ${d.social_account_id ?? null},
@@ -255,6 +293,7 @@ export const createPost = createServerFn({ method: "POST" })
           ${d.platform},
           ${d.theme},
           ${d.price},
+          ${d.location ?? ""},
           ${finalImageUrl},
           ${r2Key}
         )
@@ -268,7 +307,7 @@ export const createPost = createServerFn({ method: "POST" })
         status: post?.status,
       });
 
-      return apiSuccess({ post }, "Post created successfully", 201);
+      return apiSuccess({ post: post ? serializePostRow(post) : post }, "Post created successfully", 201);
     } catch (err) {
       return errorToResponse(err);
     }
@@ -299,6 +338,25 @@ export const updatePost = createServerFn({ method: "POST" })
 
       const d = parsed.data;
 
+      // Enforce maximum 10 scheduled posts per business workspace on status change
+      if (d.status === "Scheduled" && existing.status !== "Scheduled") {
+        const [scheduledCountRow] = await query<{ count: string }>`
+          SELECT COUNT(*)::text AS count
+          FROM posts
+          WHERE business_id = ${existing.business_id}
+            AND status = 'Scheduled'
+            AND id != ${id}
+            AND deleted_at IS NULL
+        `;
+        const currentScheduledCount = parseInt(scheduledCountRow?.count || "0", 10);
+        if (currentScheduledCount >= 10) {
+          throw new ValidationError(
+            "Schedule limit reached: You can have a maximum of 10 active scheduled posts at a time. Please wait for an existing scheduled post to publish or delete one to schedule more.",
+            [{ field: "status", message: "Maximum 10 scheduled posts allowed" }]
+          );
+        }
+      }
+
       const [post] = await query<PostRow>`
         UPDATE posts SET
           headline          = COALESCE(${d.headline ?? null}, headline),
@@ -310,6 +368,7 @@ export const updatePost = createServerFn({ method: "POST" })
           platform          = COALESCE(${d.platform ?? null}, platform),
           theme             = COALESCE(${d.theme ?? null}, theme),
           price             = COALESCE(${d.price ?? null}, price),
+          location          = COALESCE(${d.location ?? null}, location),
           image_url         = COALESCE(${d.image_url ?? null}, image_url),
           image_r2_key      = COALESCE(${d.image_r2_key ?? null}, image_r2_key),
           social_account_id = COALESCE(${d.social_account_id ?? null}, social_account_id),
@@ -318,7 +377,7 @@ export const updatePost = createServerFn({ method: "POST" })
         RETURNING *
       `;
 
-      return apiSuccess({ post }, "Post updated successfully");
+      return apiSuccess({ post: post ? serializePostRow(post) : post }, "Post updated successfully");
     } catch (err) {
       return errorToResponse(err);
     }
