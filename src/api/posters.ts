@@ -1389,7 +1389,7 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
             if (brandRow.colors?.length) brandColors = brandRow.colors;
             if (brandRow.logo_public_url) logoUrl = brandRow.logo_public_url;
             if (!logoUrl && (businessName.toLowerCase().includes("diya") || data.instruction?.toLowerCase().includes("diya ai"))) {
-              logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo.png";
+              logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v2.png";
             }
             if (logoUrl) {
               try {
@@ -1685,7 +1685,7 @@ export const generatePosters = createServerFn({ method: "POST" })
       let logoUrl = passedBrand?.logo_url || brandRow?.logo_public_url || null;
       if (!logoUrl) {
         if (businessName.toLowerCase().includes("diya") || parsed.data.prompt?.toLowerCase().includes("diya ai")) {
-          logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo.png";
+          logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v2.png";
         }
       }
 
