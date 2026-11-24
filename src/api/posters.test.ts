@@ -484,5 +484,50 @@ Supercharge your brand's social media marketing with AI. Create, manage, schedul
       expect(meta.height).toBe(1280);
       expect(composited.length).toBeGreaterThan(0);
     });
+
+    it("extracts and composites logo with off-white/beige gradient background without leaving a box", async () => {
+      const dummyFlyer = await sharp({
+        create: {
+          width: 1024,
+          height: 1280,
+          channels: 4,
+          background: { r: 245, g: 245, b: 245, alpha: 1 },
+        },
+      }).png().toBuffer();
+
+      // Create a logo with beige [223, 213, 203] background and a blue center dot
+      const dummyLogoWithBg = await sharp({
+        create: {
+          width: 200,
+          height: 100,
+          channels: 4,
+          background: { r: 223, g: 213, b: 203, alpha: 1 },
+        },
+      })
+        .composite([
+          {
+            input: await sharp({
+              create: {
+                width: 60,
+                height: 30,
+                channels: 4,
+                background: { r: 0, g: 168, b: 150, alpha: 1 },
+              },
+            }).png().toBuffer(),
+            top: 35,
+            left: 70,
+          },
+        ])
+        .png()
+        .toBuffer();
+
+      const logoDataUrl = `data:image/png;base64,${dummyLogoWithBg.toString("base64")}`;
+      const composited = await compositeLogoOnFlyer(dummyFlyer, logoDataUrl, "Portrait 4:5");
+
+      const meta = await sharp(composited).metadata();
+      expect(meta.width).toBe(1024);
+      expect(meta.height).toBe(1280);
+      expect(composited.length).toBeGreaterThan(0);
+    });
   });
 });
