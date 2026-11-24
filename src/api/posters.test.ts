@@ -469,7 +469,7 @@ Supercharge your brand's social media marketing with AI. Create, manage, schedul
       expect(composited.length).toBeGreaterThan(0);
     });
 
-    it("composites a local relative path logo (/diya-logo.png) onto a flyer canvas", async () => {
+    it("composites a local relative path logo (/diya_logo.svg) onto a flyer canvas", async () => {
       const dummyFlyer = await sharp({
         create: {
           width: 1024,
@@ -479,7 +479,7 @@ Supercharge your brand's social media marketing with AI. Create, manage, schedul
         },
       }).png().toBuffer();
 
-      const composited = await compositeLogoOnFlyer(dummyFlyer, "/diya-logo.png", "Portrait 4:5");
+      const composited = await compositeLogoOnFlyer(dummyFlyer, "/diya_logo.svg", "Portrait 4:5");
       const meta = await sharp(composited).metadata();
       expect(meta.width).toBe(1024);
       expect(meta.height).toBe(1280);

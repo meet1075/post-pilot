@@ -579,7 +579,7 @@ export async function fetchLogoBuffer(logoUrl: string): Promise<Buffer> {
     }
     const cdnUrl = `https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/${logoUrl.replace(/^\/+/, "")}`;
     try {
-      const res = await fetch(cdnUrl, { signal: AbortSignal.timeout(10_000) });
+      const res = await fetch(cdnUrl, { signal: AbortSignal.timeout(2_500) });
       if (res.ok) {
         return Buffer.from(await res.arrayBuffer());
       }
