@@ -1,9 +1,9 @@
-import { DIYA_MARK_URL, BRAND_NAME, BRAND_SUBTITLE } from "@/lib/branding";
+import { DIYA_SVG_URL, BRAND_NAME, BRAND_SUBTITLE } from "@/lib/branding";
 
 export function DiyaLogo({
   className = "",
   markClassName = "h-7 sm:h-8",
-  textClassName = "text-[10px] sm:text-[11px]",
+  textClassName = "text-[10.5px] sm:text-[11.5px]",
   subtitle = true,
   align = "center",
 }: {
@@ -21,7 +21,7 @@ export function DiyaLogo({
       } leading-none select-none group ${className}`}
     >
       <img
-        src={DIYA_MARK_URL}
+        src={DIYA_SVG_URL}
         alt={BRAND_NAME}
         className={`${markClassName} w-auto object-contain transition-transform duration-200 group-hover:scale-105 active:scale-95 drop-shadow-[0_0_16px_rgba(0,229,255,0.3)]`}
       />
