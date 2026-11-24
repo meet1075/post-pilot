@@ -557,6 +557,88 @@ Target Format & Aspect Ratio: "${format}" (${formatInstruction})${namedProduct ?
 
 // ─── Logo Compositing Helper (Sharp) ──────────────────────────────────────────
 
+export async function fetchLogoBuffer(logoUrl: string): Promise<Buffer> {
+  const fs = await import("fs");
+  const path = await import("path");
+
+  if (logoUrl.startsWith("data:")) {
+    const base64Data = logoUrl.replace(/^data:image\/\w+;base64,/, "");
+    return Buffer.from(base64Data, "base64");
+  }
+
+  if (logoUrl.startsWith("/")) {
+    const candidates = [
+      path.resolve(process.cwd(), "public", logoUrl.replace(/^\/+/, "")),
+      path.resolve(process.cwd(), ".vercel/output/static", logoUrl.replace(/^\/+/, "")),
+      path.resolve(process.cwd(), "static", logoUrl.replace(/^\/+/, "")),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        return fs.readFileSync(p);
+      }
+    }
+    const cdnUrl = `https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/${logoUrl.replace(/^\/+/, "")}`;
+    const res = await fetch(cdnUrl, { signal: AbortSignal.timeout(10_000) });
+    if (res.ok) {
+      return Buffer.from(await res.arrayBuffer());
+    }
+  }
+
+  const res = await fetch(logoUrl, { signal: AbortSignal.timeout(12_000) });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch logo image (${res.status})`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * Extracts the 2-4 primary vibrant accent hues from a logo buffer using 12-bucket hue quantization.
+ * These colors dynamically guide the entire poster's visual theme, buttons, pills, and accents.
+ */
+export async function extractLogoPalette(logoBuffer: Buffer): Promise<string[]> {
+  try {
+    const { default: sharp } = await import("sharp");
+    const { data } = await sharp(logoBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+
+    const buckets = Array.from({ length: 12 }, () => ({ count: 0, rSum: 0, gSum: 0, bSum: 0 }));
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3]! < 120) continue;
+      const r = data[i]!, g = data[i + 1]!, b = data[i + 2]!;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      const delta = max - min;
+      if (delta < 28 || max < 35 || min > 238) continue;
+
+      let h = 0;
+      if (max === r) h = ((g - b) / delta) % 6;
+      else if (max === g) h = (b - r) / delta + 2;
+      else h = (r - g) / delta + 4;
+      h = Math.round(h * 60);
+      if (h < 0) h += 360;
+
+      const idx = Math.floor(h / 30) % 12;
+      buckets[idx]!.count++;
+      buckets[idx]!.rSum += r;
+      buckets[idx]!.gSum += g;
+      buckets[idx]!.bSum += b;
+    }
+
+    const activeHues = buckets
+      .filter((b) => b.count > 10)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 4)
+      .map((b) => {
+        const r = Math.round(b.rSum / b.count);
+        const g = Math.round(b.gSum / b.count);
+        const bCol = Math.round(b.bSum / b.count);
+        return "#" + [r, g, bCol].map((x) => x.toString(16).padStart(2, "0")).join("").toUpperCase();
+      });
+
+    return activeHues.length > 0 ? activeHues : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function compositeLogoOnFlyer(
   flyerBuffer: Buffer,
   logoUrl: string,
@@ -564,24 +646,7 @@ export async function compositeLogoOnFlyer(
 ): Promise<Buffer> {
   const { default: sharp } = await import("sharp");
 
-  let logoBuffer: Buffer;
-  if (logoUrl.startsWith("data:")) {
-    const base64Data = logoUrl.replace(/^data:image\/\w+;base64,/, "");
-    logoBuffer = Buffer.from(base64Data, "base64");
-  } else if (logoUrl.startsWith("/")) {
-    const localPath = path.resolve(process.cwd(), "public", logoUrl.replace(/^\/+/, ""));
-    if (fs.existsSync(localPath)) {
-      logoBuffer = fs.readFileSync(localPath);
-    } else {
-      throw new Error(`Local logo file not found: ${localPath}`);
-    }
-  } else {
-    const res = await fetch(logoUrl, { signal: AbortSignal.timeout(12_000) });
-    if (!res.ok) {
-      throw new Error(`Failed to fetch logo image (${res.status})`);
-    }
-    logoBuffer = Buffer.from(await res.arrayBuffer());
-  }
+  const logoBuffer = await fetchLogoBuffer(logoUrl);
 
   // Inspect flyer dimensions
   const flyerMeta = await sharp(flyerBuffer).metadata();
@@ -609,28 +674,38 @@ export async function compositeLogoOnFlyer(
     getPixel(info.width - 1, Math.floor(info.height / 2)),
   ];
 
-  // If corners are already transparent (e.g. transparent PNG), skip background removal
-  const hasOpaqueBg = samplePoints.filter((p) => p[3] > 200).length >= 4;
+  // If corners are already transparent (e.g. transparent PNG), skip background removal completely!
+  const hasOpaqueBg = samplePoints.filter((p) => p[3] > 180).length >= 4;
 
   if (hasOpaqueBg) {
-    const opaqueSamples = samplePoints.filter((p) => p[3] > 200);
+    const opaqueSamples = samplePoints.filter((p) => p[3] > 180);
     const avgR = opaqueSamples.reduce((s, p) => s + p[0], 0) / opaqueSamples.length;
     const avgG = opaqueSamples.reduce((s, p) => s + p[1], 0) / opaqueSamples.length;
     const avgB = opaqueSamples.reduce((s, p) => s + p[2], 0) / opaqueSamples.length;
+
+    const isLightCornerBg = avgR > 140 && avgG > 140 && avgB > 140;
+    const isDarkCornerBg = avgR < 50 && avgG < 50 && avgB < 50;
 
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i]!;
       const g = data[i + 1]!;
       const b = data[i + 2]!;
 
-      // Euclidean distance to corner background color
+      // Distance to corner background color
       const distToCorner = Math.sqrt((r - avgR) ** 2 + (g - avgG) ** 2 + (b - avgB) ** 2);
-      // Light desaturated background check (handles beige, off-white, light gray gradients)
-      const isLightDesaturated = r > 155 && g > 145 && b > 135 && Math.abs(r - g) < 35 && Math.abs(g - b) < 35;
-      // Dark/black background check
-      const isDarkBg = r < 45 && g < 45 && b < 45;
 
-      if (distToCorner < 40 || isLightDesaturated || isDarkBg) {
+      let isBg = false;
+      if (distToCorner < 40) {
+        isBg = true;
+      } else if (isLightCornerBg && r > 160 && g > 150 && b > 140 && Math.abs(r - g) < 30 && Math.abs(g - b) < 30) {
+        // ONLY if corners are light: remove light desaturated background (never touches dark text!)
+        isBg = true;
+      } else if (isDarkCornerBg && r < 40 && g < 40 && b < 40) {
+        // ONLY if corners are dark: remove dark background (never touches light text!)
+        isBg = true;
+      }
+
+      if (isBg) {
         data[i + 3] = 0; // Transparent
       } else if (distToCorner < 55) {
         // Soft feather edge for smooth anti-aliased blending
@@ -866,7 +941,11 @@ export async function generateFinishedFlyer(opts: {
       : "");
 
   // Scene & aesthetics instruction
-  const sceneInstruction = `Atmospheric visual backdrop: ${opts.brief.scene}. Lighting and mood: ${opts.brief.style_notes}. `;
+  const colorHarmonyInstruction = opts.colors && opts.colors.length > 0
+    ? `Harmonized Brand Color Palette: ${opts.colors.join(", ")}. CRITICAL COLOR HARMONY: The accent graphics, buttons, feature badges, UI charts, and lighting highlights in the poster MUST strictly match and harmonize with this brand color palette (${opts.colors.join(", ")}). Never default to generic green or teal when the brand palette is purple, blue, gold, or red.`
+    : "";
+
+  const sceneInstruction = `Atmospheric visual backdrop: ${opts.brief.scene}. Lighting and mood: ${opts.brief.style_notes}. ${colorHarmonyInstruction} `;
   const templateObj = opts.templateId ? getTemplateById(opts.templateId) : undefined;
   const referenceDesc = templateObj ? `${templateObj.title} (${templateObj.description})` : "the selected reference design";
   const referenceInstruction = (opts.referenceImageUrl || templateObj)
@@ -1309,11 +1388,15 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
             if (brandRow.caption_tone) brandTone = brandRow.caption_tone;
             if (brandRow.colors?.length) brandColors = brandRow.colors;
             if (brandRow.logo_public_url) logoUrl = brandRow.logo_public_url;
-            const wantsDiyaLogo = /\bdiya(?:\s*ai)?\b/i.test(data.instruction || "") || businessName.toLowerCase().includes("diya");
-            if (wantsDiyaLogo && (!logoUrl || logoUrl.includes("avero"))) {
-              logoUrl = "/diya-logo.png";
-            } else if (!logoUrl) {
-              logoUrl = "/diya-logo.png";
+            if (!logoUrl && (businessName.toLowerCase().includes("diya") || data.instruction?.toLowerCase().includes("diya ai"))) {
+              logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo.png";
+            }
+            if (logoUrl) {
+              try {
+                const lBuf = await fetchLogoBuffer(logoUrl);
+                const dynPalette = await extractLogoPalette(lBuf);
+                if (dynPalette.length > 0) brandColors = dynPalette;
+              } catch {}
             }
           }
         }
@@ -1594,23 +1677,35 @@ export const generatePosters = createServerFn({ method: "POST" })
       const passedBrand = parsed.data.brand_details;
       const businessName = passedBrand?.business_name || brandRow?.business_name || business.name;
       const tagline = passedBrand?.tagline || brandRow?.tagline || business.tagline || "";
-      const rawColors = passedBrand?.colors || brandRow?.colors;
-      const brandColors = Array.isArray(rawColors) && rawColors.length > 0
-        ? rawColors
-        : (typeof rawColors === "string" ? [rawColors] : ["#00A896", "#028090", "#05668D", "#02C39A"]);
-
       const phone = passedBrand?.phone || brandRow?.phone || (business as any)?.phone || "";
       const email = passedBrand?.email || session.email || "";
       const website = passedBrand?.website || (business as any)?.website || "";
       const location = passedBrand?.location || brandRow?.location || "";
-
       // Selected business logo: prioritize brand kit updated logo, passed brand logo, or business logo
       let logoUrl = passedBrand?.logo_url || brandRow?.logo_public_url || null;
-      const wantsDiyaLogo = /\bdiya(?:\s*ai)?\b/i.test(parsed.data.prompt || "") || businessName.toLowerCase().includes("diya");
-      if (wantsDiyaLogo && (!logoUrl || logoUrl.includes("avero"))) {
-        logoUrl = "/diya-logo.png";
-      } else if (!logoUrl) {
-        logoUrl = "/diya-logo.png";
+      if (!logoUrl) {
+        if (businessName.toLowerCase().includes("diya") || parsed.data.prompt?.toLowerCase().includes("diya ai")) {
+          logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo.png";
+        }
+      }
+
+      // Dynamically extract brand colors directly from the logo if available
+      let extractedLogoPalette: string[] = [];
+      if (logoUrl) {
+        try {
+          const lBuf = await fetchLogoBuffer(logoUrl);
+          extractedLogoPalette = await extractLogoPalette(lBuf);
+        } catch {}
+      }
+
+      const rawColors = passedBrand?.colors || brandRow?.colors;
+      let brandColors: string[];
+      if (extractedLogoPalette.length > 0) {
+        brandColors = extractedLogoPalette;
+      } else if (Array.isArray(rawColors) && rawColors.length > 0) {
+        brandColors = rawColors;
+      } else {
+        brandColors = ["#00A896", "#028090", "#05668D", "#02C39A"];
       }
 
       const apiKey = getOpenAiApiKey();

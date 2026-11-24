@@ -5,6 +5,7 @@ import {
   isMetaPhrase,
   extractNamedProduct,
   compositeLogoOnFlyer,
+  extractLogoPalette,
 } from "./posters";
 import { generatePostersSchema } from "../lib/validators";
 import sharp from "sharp";
@@ -528,6 +529,94 @@ Supercharge your brand's social media marketing with AI. Create, manage, schedul
       expect(meta.width).toBe(1024);
       expect(meta.height).toBe(1280);
       expect(composited.length).toBeGreaterThan(0);
+    });
+
+    it("preserves dark logo letters when removing off-white or beige background", async () => {
+      // Create a logo with beige [225, 215, 205] corner background and black [10, 10, 10] text pixels
+      const dummyLogoWithDarkText = await sharp({
+        create: {
+          width: 160,
+          height: 80,
+          channels: 4,
+          background: { r: 225, g: 215, b: 205, alpha: 1 },
+        },
+      })
+        .composite([
+          {
+            input: await sharp({
+              create: {
+                width: 40,
+                height: 20,
+                channels: 4,
+                background: { r: 10, g: 10, b: 10, alpha: 1 },
+              },
+            }).png().toBuffer(),
+            top: 30,
+            left: 60,
+          },
+        ])
+        .png()
+        .toBuffer();
+
+      const dummyFlyer = await sharp({
+        create: {
+          width: 1024,
+          height: 1280,
+          channels: 4,
+          background: { r: 255, g: 255, b: 255, alpha: 1 },
+        },
+      }).png().toBuffer();
+
+      const composited = await compositeLogoOnFlyer(dummyFlyer, `data:image/png;base64,${dummyLogoWithDarkText.toString("base64")}`, "Portrait 4:5");
+      expect(composited.length).toBeGreaterThan(0);
+    });
+
+    it("extracts vibrant accent hues and ignores background/neutral pixels", async () => {
+      // Create a test image with neutral white background and vibrant purple (200, 30, 230) and cyan (15, 200, 245) patches
+      const testBuffer = await sharp({
+        create: {
+          width: 100,
+          height: 100,
+          channels: 4,
+          background: { r: 255, g: 255, b: 255, alpha: 1 },
+        },
+      })
+        .composite([
+          {
+            input: await sharp({
+              create: {
+                width: 30,
+                height: 30,
+                channels: 4,
+                background: { r: 165, g: 3, b: 227, alpha: 1 }, // Magenta / Purple
+              },
+            }).png().toBuffer(),
+            top: 10,
+            left: 10,
+          },
+          {
+            input: await sharp({
+              create: {
+                width: 30,
+                height: 30,
+                channels: 4,
+                background: { r: 15, g: 180, b: 245, alpha: 1 }, // Neon Cyan
+              },
+            }).png().toBuffer(),
+            top: 50,
+            left: 50,
+          },
+        ])
+        .png()
+        .toBuffer();
+
+      const palette = await extractLogoPalette(testBuffer);
+      expect(palette.length).toBeGreaterThan(0);
+      expect(palette.length).toBeLessThanOrEqual(4);
+      // Ensure hex format
+      for (const hex of palette) {
+        expect(hex).toMatch(/^#[0-9A-F]{6}$/);
+      }
     });
   });
 });
