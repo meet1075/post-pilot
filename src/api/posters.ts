@@ -578,10 +578,16 @@ export async function fetchLogoBuffer(logoUrl: string): Promise<Buffer> {
       }
     }
     const cdnUrl = `https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/${logoUrl.replace(/^\/+/, "")}`;
-    const res = await fetch(cdnUrl, { signal: AbortSignal.timeout(10_000) });
-    if (res.ok) {
-      return Buffer.from(await res.arrayBuffer());
-    }
+    try {
+      const res = await fetch(cdnUrl, { signal: AbortSignal.timeout(10_000) });
+      if (res.ok) {
+        return Buffer.from(await res.arrayBuffer());
+      }
+    } catch {}
+    const { default: sharp } = await import("sharp");
+    return sharp({
+      create: { width: 100, height: 100, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+    }).png().toBuffer();
   }
 
   const res = await fetch(logoUrl, { signal: AbortSignal.timeout(12_000) });
@@ -1359,7 +1365,7 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
       let tagline = "Your AI-Powered Marketing Agency";
       let brandColors = ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"];
       let brandTone = "Premium";
-      let logoUrl: string | null = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v3.png";
+      let logoUrl: string | null = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v4.png";
 
       try {
         const session = await requireAuth();
@@ -1389,7 +1395,7 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
             if (brandRow.colors?.length) brandColors = brandRow.colors;
             if (brandRow.logo_public_url) logoUrl = brandRow.logo_public_url;
             if (!logoUrl && (businessName.toLowerCase().includes("diya") || data.instruction?.toLowerCase().includes("diya ai"))) {
-              logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v3.png";
+              logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v4.png";
             }
             if (logoUrl) {
               try {
@@ -1684,7 +1690,7 @@ export const generatePosters = createServerFn({ method: "POST" })
       // Selected business logo: prioritize brand kit updated logo, passed brand logo, or business logo
       let logoUrl = passedBrand?.logo_url || brandRow?.logo_public_url || null;
       if (!logoUrl || logoUrl.includes("avero_logo_transparent")) {
-        logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v3.png";
+        logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v4.png";
       }
 
       // Dynamically extract brand colors directly from the logo if available

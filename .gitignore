@@ -45,5 +45,8 @@ dist-ssr
 
 # Generated images and media (persisted in Cloudflare R2 bucket, never in git repo)
 public/templates/
+public/diya-*.png
 *.pdf
 page_preview-*.png
+.agents/
+skills-lock.json
