@@ -188,7 +188,7 @@ export async function generateFlyerBrief(opts: {
   const apiKey = getOpenAiApiKey();
   const model = process.env["OPENAI_MODEL"]?.trim() || "gpt-4o-mini";
 
-  const brandName = opts.businessName || "Avero Innovations";
+  const brandName = opts.businessName || "Diya AI";
   const brandTagline = opts.tagline || "";
   const brandColors = opts.colors?.join(", ") || "teal, navy blue, clean white";
   const brandTone = opts.tone || "Premium";
@@ -1355,11 +1355,11 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
       const targetFormat = data.format || "Portrait 4:5";
       const targetSize = targetFormat === "Square" ? "1024x1024" : targetFormat === "Story" ? "1024x1792" : "1024x1280";
 
-      let businessName = "Avero Innovations";
-      let tagline = "Tech Today. Tomorrow Together.";
-      let brandColors = ["#00A896", "#028090", "#05668D", "#02C39A"];
+      let businessName = "Diya AI";
+      let tagline = "Your AI-Powered Marketing Agency";
+      let brandColors = ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"];
       let brandTone = "Premium";
-      let logoUrl: string | null = "https://dihikyljbrbidqgelwac.supabase.co/storage/v1/object/public/post-pilot/logos/7d7831d4-8c66-407b-acbc-a2060d66ff00/1792316942214-avero_logo_transparent.png";
+      let logoUrl: string | null = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v3.png";
 
       try {
         const session = await requireAuth();
@@ -1389,7 +1389,7 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
             if (brandRow.colors?.length) brandColors = brandRow.colors;
             if (brandRow.logo_public_url) logoUrl = brandRow.logo_public_url;
             if (!logoUrl && (businessName.toLowerCase().includes("diya") || data.instruction?.toLowerCase().includes("diya ai"))) {
-              logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v2.png";
+              logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v3.png";
             }
             if (logoUrl) {
               try {
@@ -1683,10 +1683,8 @@ export const generatePosters = createServerFn({ method: "POST" })
       const location = passedBrand?.location || brandRow?.location || "";
       // Selected business logo: prioritize brand kit updated logo, passed brand logo, or business logo
       let logoUrl = passedBrand?.logo_url || brandRow?.logo_public_url || null;
-      if (!logoUrl) {
-        if (businessName.toLowerCase().includes("diya") || parsed.data.prompt?.toLowerCase().includes("diya ai")) {
-          logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v2.png";
-        }
+      if (!logoUrl || logoUrl.includes("avero_logo_transparent")) {
+        logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v3.png";
       }
 
       // Dynamically extract brand colors directly from the logo if available

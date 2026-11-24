@@ -334,31 +334,36 @@ function PostPilot() {
     const cachedBizList = getCachedBusinesses();
     const currentBiz = cachedBizList.find((b) => b.id === initialActiveBizId);
     if (currentBiz) {
+      const isDiya = currentBiz.name.toLowerCase().includes("diya") || !currentBiz.logo_url || currentBiz.logo_url.includes("avero_logo_transparent");
       return {
         businessId: currentBiz.id,
         businessName: currentBiz.name,
-        tagline: currentBiz.tagline || "",
+        tagline: currentBiz.tagline || (isDiya ? "Your AI-Powered Marketing Agency" : ""),
         location: (currentBiz as any).location || "Ahmedabad",
         phone: (currentBiz as any).phone || "6355206575",
-        email: (currentBiz as any).email || "averoinnovations@gmail.com",
+        email: (currentBiz as any).email || "sonimeet1075@gmail.com",
         website: (currentBiz as any).website || "https://averoinnovations.com/",
-        colors: currentBiz.brand_colors && currentBiz.brand_colors.length > 0 ? currentBiz.brand_colors : ["#00A896", "#028090", "#05668D", "#02C39A"],
+        colors: currentBiz.brand_colors && currentBiz.brand_colors.length > 0
+          ? currentBiz.brand_colors
+          : isDiya
+            ? ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"]
+            : ["#00A896", "#028090", "#05668D", "#02C39A"],
         font: (currentBiz as any).font || "Work Sans",
-        logoUrl: currentBiz.logo_url || "https://dihikyljbrbidqgelwac.supabase.co/storage/v1/object/public/post-pilot/logos/7d7831d4-8c66-407b-acbc-a2060d66ff00/1792316942214-avero_logo_transparent.png",
-        logoName: "Brand Mark",
+        logoUrl: isDiya ? DIYA_LOGO_URL : (currentBiz.logo_url || DIYA_LOGO_URL),
+        logoName: isDiya ? "Diya AI Logo" : "Brand Mark",
       };
     }
     return {
-      businessName: isMeetSoni ? "Avero Innovations" : "My Workspace",
-      tagline: "Ideas today. Tomorrow together.",
+      businessName: isMeetSoni ? "Diya AI" : "My Workspace",
+      tagline: "Your AI-Powered Marketing Agency",
       location: "Ahmedabad",
       phone: "6355206575",
-      email: "averoinnovations@gmail.com",
+      email: "sonimeet1075@gmail.com",
       website: "https://averoinnovations.com/",
-      colors: ["#00A896", "#028090", "#05668D", "#02C39A"],
+      colors: ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"],
       font: "Work Sans",
-      logoUrl: "https://dihikyljbrbidqgelwac.supabase.co/storage/v1/object/public/post-pilot/logos/7d7831d4-8c66-407b-acbc-a2060d66ff00/1792316942214-avero_logo_transparent.png",
-      logoName: "Brand Mark",
+      logoUrl: DIYA_LOGO_URL,
+      logoName: "Diya AI Logo",
     };
   });
 
@@ -449,20 +454,26 @@ function PostPilot() {
       let newBrandKit = brandKit;
       if (bRes?.success && bRes.business) {
         const b = bRes.business;
+        const isDiya = b.name.toLowerCase().includes("diya") || !b.logo_url || b.logo_url.includes("avero_logo_transparent");
         newBrandKit = {
           businessId: b.id,
           businessName: b.name,
-          tagline: b.tagline || "",
+          tagline: b.tagline || (isDiya ? "Your AI-Powered Marketing Agency" : ""),
           location: b.location || "",
           phone: b.phone || "",
           website: (b as any).website || "",
           email: (b as any).email || "",
-          colors: Array.isArray(b.brand_colors) && b.brand_colors.length > 0 ? b.brand_colors : ["Tomato", "Olive"],
+          colors: Array.isArray(b.brand_colors) && b.brand_colors.length > 0
+            ? b.brand_colors
+            : isDiya
+              ? ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"]
+              : ["Tomato", "Olive"],
           font: (b as any).font || "Work Sans",
           tone: b.tone || "Friendly",
           timezone: b.timezone || "Asia/Kolkata",
-          defaultHashtags: b.default_hashtags || "",
-          logoUrl: b.logo_url || undefined,
+          defaultHashtags: b.default_hashtags || (isDiya ? "#DiyaAI, #AIMarketing, #MarketingAgency" : ""),
+          logoUrl: isDiya ? (b.logo_url && !b.logo_url.includes("avero_logo_transparent") ? b.logo_url : DIYA_LOGO_URL) : (b.logo_url || undefined),
+          logoName: isDiya ? "Diya AI Logo" : "Brand Mark",
         };
         setBrandKit(newBrandKit);
       }
@@ -3184,7 +3195,7 @@ function CreateFlow({
                           <span className="text-xs font-semibold text-foreground block">Logo</span>
                           {brandKit.logoUrl ? (
                             <div className="mt-1 flex items-center gap-2">
-                              <img src={brandKit.logoUrl} alt="Logo" className="h-6 w-6 rounded-md object-contain bg-white p-0.5" />
+                              <img src={brandKit.logoUrl} alt="Logo" className="h-6 w-6 rounded-md object-contain bg-slate-900/60 border border-white/10 p-0.5" />
                               <span className="text-[11px] text-muted-foreground truncate">{brandKit.logoName || "Brand Mark"}</span>
                             </div>
                           ) : (
@@ -5949,13 +5960,13 @@ function BrandKit({
   data: BrandKitData;
   onSave: (updated: BrandKitData) => void;
 }) {
-  const [name, setName] = useState(data.businessName || "Avero Innovations");
+  const [name, setName] = useState(data.businessName || "Diya AI");
   const [tagline, setTagline] = useState(data.tagline || "");
   const [location, setLocation] = useState(data.location || "");
   const [phone, setPhone] = useState(data.phone || "");
   const [website, setWebsite] = useState(data.website || "");
   const [email, setEmail] = useState(data.email || "");
-  const [colors, setColors] = useState<string[]>(data.colors && data.colors.length > 0 ? data.colors : ["#00A896", "#028090", "#05668D", "#02C39A"]);
+  const [colors, setColors] = useState<string[]>(data.colors && data.colors.length > 0 ? data.colors : ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"]);
   const [font, setFont] = useState(data.font || "Work Sans");
   const [logoName, setLogoName] = useState(data.logoName || "");
   const [logoUrl, setLogoUrl] = useState(data.logoUrl || "");
@@ -5971,7 +5982,7 @@ function BrandKit({
     setPhone(data.phone || "");
     setWebsite(data.website || "");
     setEmail(data.email || "");
-    setColors(data.colors && data.colors.length > 0 ? data.colors : ["#00A896", "#028090", "#05668D", "#02C39A"]);
+    setColors(data.colors && data.colors.length > 0 ? data.colors : ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"]);
     setFont(data.font || "Work Sans");
     setLogoName(data.logoName || "");
     setLogoUrl(data.logoUrl || "");
@@ -5996,7 +6007,7 @@ function BrandKit({
     }
     const updated: BrandKitData = {
       businessId: data.businessId,
-      businessName: name.trim() || "Avero Innovations",
+      businessName: name.trim() || "Diya AI",
       tagline: tagline.trim(),
       location: location.trim(),
       phone: phone.trim(),
