@@ -207,11 +207,21 @@ pixel-perfect-pixels/
   - Backend: [src/api/captions.ts](file:///home/meet/pixel-perfect-pixels/src/api/captions.ts).
 
 ### 4.3 Geocoding & Localized Hashtags Engine
-- **What it does**: Solves local discovery by automatically extracting and appending high-engagement geographic hashtags (city, neighborhood, state, country) to the post.
-- **Live Search & Taxonomy**:
-  - Integrated with OpenStreetMap Nominatim and Overpass APIs for real-time location autocompletion (e.g., searching "Ahmedabad" fetches Gujarat, India, and neighborhood landmarks).
-  - Hierarchical hashtag generator formats location combinations: `#AhmedabadFoodie`, `#AhmedabadBusiness`, `#GujaratMarketing`, `#AhmedabadDiaries`.
+- **What it does**: Solves local discovery by allowing users to select Country, State, City, and Pincode through fast, local, searchable dropdowns and automatically generating high-engagement local hashtags for social media publishing.
+- **Local-Only 3-Country Architecture**:
+  - **3 Primary Markets**: United States (🇺🇸), Canada (🇨🇦), and India (🇮🇳).
+  - **All States & Provinces**:
+    - **United States**: All 50 states + Washington D.C. (51 total).
+    - **Canada**: All 10 provinces + 3 territories (13 total).
+    - **India**: All 28 states + 8 Union Territories (36 total).
+  - **All Cities per State**: Comprehensive directory of cities across all states and provinces.
+  - **Pincodes Only**: Displays clean, authentic postal/PIN codes (e.g. `380059`, `10001`, `M5V`) without verbose area clutter.
+  - **In-Dropdown Search**: Interactive `SearchableSelect` component allows typing to filter Country, State, City, and Pincode directly within each dropdown.
+  - **100% Local Execution**: Operates purely in-memory with zero network latency or external API downtime.
 - **Where it lives**:
+  - Frontend: `Create` view in [src/routes/index.tsx](file:///home/meet/pixel-perfect-pixels/src/routes/index.tsx).
+  - Component: [src/components/SearchableSelect.tsx](file:///home/meet/pixel-perfect-pixels/src/components/SearchableSelect.tsx).
+  - Taxonomy & Engine: [src/lib/geoHashtags.ts](file:///home/meet/pixel-perfect-pixels/src/lib/geoHashtags.ts).
   - Frontend: Location picker in `src/routes/index.tsx`.
   - Geocoding Service: [src/lib/geoApiService.ts](file:///home/meet/pixel-perfect-pixels/src/lib/geoApiService.ts).
   - Hashtag Taxonomy: [src/lib/geoHashtags.ts](file:///home/meet/pixel-perfect-pixels/src/lib/geoHashtags.ts).
@@ -539,3 +549,4 @@ npm run preview
 ```
 
 The build command automatically runs `scripts/deploy-migrate.mjs` to synchronize database schemas on Neon before compiling the Vite/Nitro SSR production bundle.
+

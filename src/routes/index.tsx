@@ -101,7 +101,8 @@ import {
 import { DIYA_LOGO_URL } from "@/lib/branding";
 import { TemplatesView } from "@/components/TemplatesView";
 import { TEMPLATES, getTemplateById, type TemplateItem } from "@/lib/templates";
-import { getGeoCountries, getGeoStates, getGeoCities, getGeoAreas, generateLocationHashtags, type GeoCity } from "@/lib/geoHashtags";
+import { getGeoCountries, getGeoStates, getGeoCities, getGeoAreas, getGeoPincodes, generateLocationHashtags, type GeoCity } from "@/lib/geoHashtags";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { searchLocationsLive, fetchLiveCitiesByState, type GeoLocationItem } from "@/lib/geoApiService";
 
 type Page = "Home" | "Create" | "Templates" | "Scheduled" | "Posted" | "Brand kit" | "Accounts" | "Settings";
@@ -4333,144 +4334,124 @@ function PublishStep({
     }
   };
 
-  // Dynamic Geo Hashtag & Location Engine
+  // Dynamic Geo Hashtag & Location Engine (Local Only: US, Canada, India)
   const geoCountries = useMemo(() => getGeoCountries(), []);
 
-  const [geoCountry, setGeoCountry] = useState(() => {
+  const [geoCountry, setGeoCountry] = useState<string>(() => {
     const locLower = (postLocation || brandKitLocation || "").toLowerCase();
     if (locLower.includes("us") || locLower.includes("york") || locLower.includes("america") || locLower.includes("california")) return "usa";
-    if (locLower.includes("uk") || locLower.includes("london") || locLower.includes("england")) return "uk";
-    if (locLower.includes("dubai") || locLower.includes("uae") || locLower.includes("abu dhabi")) return "uae";
-    if (locLower.includes("canada") || locLower.includes("toronto")) return "canada";
-    if (locLower.includes("australia") || locLower.includes("sydney")) return "australia";
+    if (locLower.includes("canada") || locLower.includes("toronto") || locLower.includes("vancouver") || locLower.includes("montreal")) return "canada";
     return "india";
   });
 
   const availableStates = useMemo(() => getGeoStates(geoCountry), [geoCountry]);
   const [geoState, setGeoState] = useState<string>("all");
-  const [citySearchFilter, setCitySearchFilter] = useState<string>("");
-
-  // Live Cities via CountriesNow third-party API
-  const [liveCities, setLiveCities] = useState<GeoCity[] | null>(null);
-  const [loadingLiveCities, setLoadingLiveCities] = useState<boolean>(false);
-
-  // Live Global Geocoding & Autocomplete via OpenStreetMap Nominatim & Zippopotam
-  const [liveLocationSearchResults, setLiveLocationSearchResults] = useState<GeoLocationItem[]>([]);
-  const [isSearchingLive, setIsSearchingLive] = useState<boolean>(false);
-
-  // Fetch live cities from CountriesNow when a specific state is chosen
-  useEffect(() => {
-    if (geoState === "all") {
-      setLiveCities(null);
-      return;
-    }
-    const currentCountryObj = geoCountries.find((c) => c.id === geoCountry);
-    const countryName = currentCountryObj?.name || geoCountry;
-    const currentStateObj = availableStates.find((s) => s.code === geoState || s.id === geoState);
-    const stateName = currentStateObj?.name || geoState;
-
-    let active = true;
-    setLoadingLiveCities(true);
-    fetchLiveCitiesByState(countryName, stateName)
-      .then((cities) => {
-        if (active && cities && cities.length > 0) {
-          setLiveCities(cities);
-        }
-      })
-      .catch(() => {
-        // Handled silently by fallback
-      })
-      .finally(() => {
-        if (active) setLoadingLiveCities(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [geoCountry, geoState, geoCountries, availableStates]);
-
-  // Live location search debounce effect (OpenStreetMap Nominatim & Zippopotam)
-  useEffect(() => {
-    const query = citySearchFilter.trim();
-    if (query.length < 2) {
-      setLiveLocationSearchResults([]);
-      setIsSearchingLive(false);
-      return;
-    }
-
-    const currentCountryObj = geoCountries.find((c) => c.id === geoCountry);
-    const timer = setTimeout(() => {
-      setIsSearchingLive(true);
-      searchLocationsLive(query, currentCountryObj?.code ? { countryCode: currentCountryObj.code } : undefined)
-        .then((items) => {
-          setLiveLocationSearchResults(items);
-        })
-        .catch(() => {
-          setLiveLocationSearchResults([]);
-        })
-        .finally(() => {
-          setIsSearchingLive(false);
-        });
-    }, 350);
-
-    return () => clearTimeout(timer);
-  }, [citySearchFilter, geoCountry, geoCountries]);
 
   const availableCities = useMemo(() => {
-    let cities = liveCities || getGeoCities(geoCountry, geoState === "all" ? undefined : geoState);
-    if (citySearchFilter.trim()) {
-      const q = citySearchFilter.trim().toLowerCase();
-      cities = cities.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) ||
-          (c.stateOrRegion && c.stateOrRegion.toLowerCase().includes(q)) ||
-          (c.stateCode && c.stateCode.toLowerCase().includes(q)) ||
-          c.areas.some((a) => a.name.toLowerCase().includes(q) || a.postalCode.includes(q))
-      );
-    }
-    return cities;
-  }, [geoCountry, geoState, citySearchFilter, liveCities]);
+    return getGeoCities(geoCountry, geoState === "all" ? undefined : geoState);
+  }, [geoCountry, geoState]);
 
-  const [geoCity, setGeoCity] = useState(() => {
+  const [geoCity, setGeoCity] = useState<string>(() => {
     const locLower = (postLocation || brandKitLocation || "").toLowerCase();
     if (locLower.includes("mumbai")) return "mumbai";
     if (locLower.includes("bangalore") || locLower.includes("bengaluru")) return "bengaluru";
     if (locLower.includes("delhi")) return "delhi";
     if (locLower.includes("pune")) return "pune";
     if (locLower.includes("hyderabad")) return "hyderabad";
+    if (locLower.includes("surat")) return "surat";
+    if (locLower.includes("vadodara")) return "vadodara";
     if (locLower.includes("york") || locLower.includes("nyc")) return "new-york";
     if (locLower.includes("los angeles") || locLower.includes("la")) return "los-angeles";
     if (locLower.includes("francisco") || locLower.includes("sf")) return "san-francisco";
-    return availableCities[0]?.id || "ahmedabad";
+    if (locLower.includes("toronto")) return "toronto";
+    if (locLower.includes("vancouver")) return "vancouver";
+    if (locLower.includes("montreal")) return "montreal";
+    return "ahmedabad";
   });
 
-  // Keep city valid when country changes
+  // Keep city valid when state or country changes
   useEffect(() => {
-    if (availableCities.length > 0 && !availableCities.some((c) => c.id === geoCity)) {
-      setGeoCity(availableCities[0]?.id || "");
+    if (geoCity !== "all" && availableCities.length > 0 && !availableCities.some((c) => c.id === geoCity)) {
+      setGeoCity(availableCities[0]?.id || "all");
     }
   }, [availableCities, geoCity]);
 
-  const availableAreas = useMemo(() => getGeoAreas(geoCountry, geoCity), [geoCountry, geoCity]);
-  const [geoArea, setGeoArea] = useState("");
+  // Pincodes for selected country, city, and state (Local only)
+  const availablePincodes = useMemo(() => {
+    return getGeoPincodes(geoCountry, geoCity === "all" ? undefined : geoCity, geoState === "all" ? undefined : geoState);
+  }, [geoCountry, geoCity, geoState]);
 
-  const selectedAreaObj = useMemo(() => {
-    return availableAreas.find((a) => a.id === geoArea);
-  }, [availableAreas, geoArea]);
+  const [geoPincode, setGeoPincode] = useState<string>("all");
+
+  // Keep pincode valid when availablePincodes change
+  useEffect(() => {
+    if (geoPincode !== "all" && availablePincodes.length > 0 && !availablePincodes.some((p) => p.postalCode === geoPincode)) {
+      setGeoPincode("all");
+    }
+  }, [availablePincodes, geoPincode]);
 
   const selectedCityObj = useMemo(() => {
     return availableCities.find((c) => c.id === geoCity);
   }, [availableCities, geoCity]);
 
+  const currentStateObj = useMemo(() => {
+    return availableStates.find((s) => s.code === geoState || s.id === geoState);
+  }, [availableStates, geoState]);
+
+  const currentCountryObj = useMemo(() => {
+    return geoCountries.find((c) => c.id === geoCountry);
+  }, [geoCountries, geoCountry]);
+
   const suggestedGeoHashtags = useMemo(() => {
     return generateLocationHashtags({
       countryId: geoCountry,
       stateCode: geoState !== "all" ? geoState : undefined,
-      cityId: geoCity || undefined,
-      areaId: geoArea || undefined,
+      cityId: geoCity !== "all" ? geoCity : undefined,
+      areaId: geoPincode !== "all" ? geoPincode : undefined,
       customLocation: postLocation,
     });
-  }, [geoCountry, geoState, geoCity, geoArea, postLocation]);
+  }, [geoCountry, geoState, geoCity, geoPincode, postLocation]);
+
+  // Searchable Dropdown Options
+  const countryOptions = useMemo(() => {
+    return geoCountries.map((c) => ({
+      value: c.id,
+      label: c.name,
+      flag: c.flag,
+    }));
+  }, [geoCountries]);
+
+  const stateOptions = useMemo(() => {
+    return [
+      { value: "all", label: "All States & Regions" },
+      ...availableStates.map((st) => ({
+        value: st.code,
+        label: st.name,
+        subLabel: st.code,
+      })),
+    ];
+  }, [availableStates]);
+
+  const cityOptions = useMemo(() => {
+    return [
+      { value: "all", label: "All Cities" },
+      ...availableCities.map((city) => ({
+        value: city.id,
+        label: city.name,
+        subLabel: city.stateCode || city.stateOrRegion,
+      })),
+    ];
+  }, [availableCities]);
+
+  const pincodeOptions = useMemo(() => {
+    return [
+      { value: "all", label: "All Pincodes" },
+      ...availablePincodes.map((p) => ({
+        value: p.postalCode,
+        label: p.postalCode, // In it only show pincode!
+      })),
+    ];
+  }, [availablePincodes]);
 
   const [selectedGeoTags, setSelectedGeoTags] = useState<string[]>([]);
 
@@ -4855,192 +4836,105 @@ function PublishStep({
             </div>
           </div>
 
-          {/* Dynamic Geo Hashtags Selector */}
+          {/* Dynamic Geo Hashtags & Location Selector (100% Local: US, Canada, India) */}
           <div className="rounded-xl border border-white/[0.06] bg-secondary/30 p-3 sm:p-4">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <Hash className="h-3.5 w-3.5 text-primary" /> Dynamic Location Hashtags
               </span>
-              <span className="text-[10px] text-muted-foreground">Country → City → Area / ZIP</span>
-            </div>
-
-            {/* Quick Search & Filter bar for any city / zip */}
-            <div className="relative mb-3">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                <Input
-                  value={citySearchFilter}
-                  onChange={(e) => setCitySearchFilter(e.target.value)}
-                  placeholder="Filter by city, state name, or ZIP code (e.g. Houston, Austin, Dallas, 77002, 90210)..."
-                  className="h-8 pl-8 pr-8 rounded-lg bg-background/80 border-white/[0.08] text-xs text-foreground placeholder:text-muted-foreground/60"
-                />
-                {isSearchingLive && (
-                  <LoaderCircle className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-primary" />
-                )}
-              </div>
-
-              {/* Live Location Results Autocomplete Panel via OpenStreetMap Nominatim & Zippopotam */}
-              {liveLocationSearchResults.length > 0 && (
-                <div className="absolute left-0 right-0 top-full mt-1.5 rounded-xl border border-primary/30 bg-card/95 p-2 shadow-2xl backdrop-blur-xl space-y-1 z-30">
-                  <div className="flex items-center justify-between px-2 py-1 text-[10px] font-semibold text-primary">
-                    <span className="flex items-center gap-1">
-                      <Sparkles className="h-3 w-3" /> Live Geocoding Results (OpenStreetMap & Zippopotam)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setLiveLocationSearchResults([])}
-                      className="text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                  <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
-                    {liveLocationSearchResults.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between p-2 rounded-lg bg-secondary/50 hover:bg-primary/15 hover:border-primary/30 border border-white/5 transition-all text-xs cursor-pointer group"
-                        onClick={() => {
-                          onLocationChange?.(item.shortLabel || item.name);
-                          if (item.hashtags && item.hashtags.length > 0) {
-                            setSelectedGeoTags((prev) => Array.from(new Set([...item.hashtags.slice(0, 8), ...prev])));
-                          }
-                          if (item.countryCode) {
-                            const matched = geoCountries.find((c) => c.code.toLowerCase() === item.countryCode.toLowerCase());
-                            if (matched) setGeoCountry(matched.id);
-                          }
-                          setLiveLocationSearchResults([]);
-                        }}
-                      >
-                        <div className="min-w-0 pr-2">
-                          <p className="font-semibold text-foreground group-hover:text-primary flex items-center gap-1 truncate">
-                            <MapPin className="h-3 w-3 text-primary shrink-0" />
-                            {item.shortLabel || item.name}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground truncate">{item.label}</p>
-                        </div>
-                        <button
-                          type="button"
-                          className="shrink-0 px-2 py-1 rounded-md text-[10px] font-bold bg-primary text-white group-hover:bg-primary/90 shadow-xs"
-                        >
-                          Select & Tag
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <span className="text-[10px] text-muted-foreground">Country → State → City → Pincode (Local)</span>
             </div>
 
             <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-              {/* Country */}
+              {/* Country (3 only: US, Canada, India) */}
               <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Country</label>
-                <select
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                  Country ({countryOptions.length})
+                </label>
+                <SearchableSelect
                   value={geoCountry}
-                  onChange={(e) => {
-                    const nextCountry = e.target.value;
+                  onChange={(nextCountry) => {
                     setGeoCountry(nextCountry);
                     setGeoState("all");
-                    setCitySearchFilter("");
                     const cities = getGeoCities(nextCountry);
-                    const defaultCity = cities[0]?.id || "";
-                    setGeoCity(defaultCity);
-                    const areas = getGeoAreas(nextCountry, defaultCity);
-                    setGeoArea(areas[0]?.id || "");
+                    setGeoCity(cities[0]?.id || "all");
+                    setGeoPincode("all");
                   }}
-                  className="flex h-9 w-full rounded-lg border border-white/[0.08] bg-background px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
-                >
-                  {geoCountries.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.flag} {c.name}
-                    </option>
-                  ))}
-                </select>
+                  options={countryOptions}
+                  searchPlaceholder="Search country (US, Canada, India)..."
+                />
               </div>
 
-              {/* State / Region */}
+              {/* State / Region (All states of these 3 countries) */}
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                   State / Region {availableStates.length > 0 && `(${availableStates.length})`}
                 </label>
-                <select
+                <SearchableSelect
                   value={geoState}
-                  onChange={(e) => {
-                    const nextState = e.target.value;
+                  onChange={(nextState) => {
                     setGeoState(nextState);
                     const cities = getGeoCities(geoCountry, nextState === "all" ? undefined : nextState);
-                    if (cities[0]) {
-                      setGeoCity(cities[0].id);
-                      const areas = getGeoAreas(geoCountry, cities[0].id);
-                      setGeoArea(areas[0]?.id || "");
-                    }
+                    setGeoCity(cities[0]?.id || "all");
+                    setGeoPincode("all");
                   }}
-                  className="flex h-9 w-full rounded-lg border border-white/[0.08] bg-background px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
-                >
-                  <option value="all">All States & Regions</option>
-                  {availableStates.map((st) => (
-                    <option key={st.code} value={st.code}>
-                      {st.name} ({st.code})
-                    </option>
-                  ))}
-                </select>
+                  options={stateOptions}
+                  searchPlaceholder="Search state / province..."
+                />
               </div>
 
-              {/* City */}
+              {/* City (All cities of state) */}
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  City {availableCities.length > 0 && `(${availableCities.length}${liveCities ? " · Live API" : ""})`}
-                  {loadingLiveCities && <LoaderCircle className="inline h-3 w-3 animate-spin text-primary ml-1" />}
+                  City {availableCities.length > 0 && `(${availableCities.length})`}
                 </label>
-                <select
+                <SearchableSelect
                   value={geoCity}
-                  onChange={(e) => {
-                    const nextCity = e.target.value;
+                  onChange={(nextCity) => {
                     setGeoCity(nextCity);
-                    const areas = getGeoAreas(geoCountry, nextCity);
-                    setGeoArea(areas[0]?.id || "");
+                    setGeoPincode("all");
                   }}
-                  className="flex h-9 w-full rounded-lg border border-white/[0.08] bg-background px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
-                >
-                  {availableCities.map((city) => (
-                    <option key={city.id} value={city.id}>
-                      {city.name} {city.stateCode ? `(${city.stateCode})` : city.stateOrRegion ? `(${city.stateOrRegion})` : ""}
-                    </option>
-                  ))}
-                </select>
+                  options={cityOptions}
+                  searchPlaceholder="Search city..."
+                />
               </div>
 
-              {/* Area & Postal/ZIP Code */}
+              {/* Pincode (In it only show pincode) */}
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  Area / Postal ZIP Code
+                  Pincode {availablePincodes.length > 0 && `(${availablePincodes.length})`}
                 </label>
-                <select
-                  value={geoArea}
-                  onChange={(e) => setGeoArea(e.target.value)}
-                  className="flex h-9 w-full rounded-lg border border-white/[0.08] bg-background px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
-                >
-                  <option value="">All areas & city-wide</option>
-                  {availableAreas.map((area) => (
-                    <option key={area.id} value={area.id}>
-                      {area.postalCode ? `${area.postalCode} — ` : ""}{area.name}
-                    </option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  value={geoPincode}
+                  onChange={(nextPincode) => setGeoPincode(nextPincode)}
+                  options={pincodeOptions}
+                  searchPlaceholder="Search pincode..."
+                />
               </div>
             </div>
 
-            {/* Quick action to set chosen area as location tag */}
-            {selectedAreaObj && (
+            {/* Quick action to set chosen location as post location tag */}
+            {(selectedCityObj || geoPincode !== "all") && (
               <div className="mt-2.5 flex items-center justify-between text-[11px] pt-1">
                 <span className="text-muted-foreground">
-                  Area: <strong>{selectedAreaObj.name}</strong> ({selectedAreaObj.postalCode})
+                  Location:{" "}
+                  <strong>
+                    {geoPincode !== "all" ? `${geoPincode}, ` : ""}
+                    {selectedCityObj?.name || (geoCity !== "all" ? geoCity : "")}
+                    {currentStateObj ? `, ${currentStateObj.name}` : ""}
+                    {currentCountryObj ? `, ${currentCountryObj.name}` : ""}
+                  </strong>
                 </span>
                 <button
                   type="button"
                   onClick={() => {
-                    const loc = `${selectedAreaObj.name}, ${selectedCityObj?.name || ""}`.replace(/^,\s*|,\s*$/g, "");
-                    onLocationChange?.(loc);
+                    const parts = [
+                      geoPincode !== "all" ? geoPincode : "",
+                      selectedCityObj?.name || (geoCity !== "all" ? geoCity : ""),
+                      currentStateObj?.name || "",
+                      currentCountryObj?.name || "",
+                    ].filter(Boolean);
+                    onLocationChange?.(parts.join(", "));
                   }}
                   className="text-primary font-semibold hover:underline flex items-center gap-1"
                 >
