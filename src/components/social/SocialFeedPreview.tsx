@@ -19,18 +19,18 @@ import { Button } from "@/components/ui/button";
 export type SocialFeedPlatform = "Instagram" | "Facebook";
 
 export interface SocialFeedPreviewProps {
-  platform?: SocialFeedPlatform;
+  platform?: SocialFeedPlatform | undefined;
   imageUrl: string;
-  businessName?: string;
-  handle?: string;
-  caption?: string;
-  headline?: string;
+  businessName?: string | undefined;
+  handle?: string | undefined;
+  caption?: string | undefined;
+  headline?: string | undefined;
   logoUrl?: string | null | undefined;
-  location?: string;
-  format?: "Square" | "Portrait 4:5" | "Story" | string;
-  showPlatformToggle?: boolean;
-  onPlatformChange?: (platform: SocialFeedPlatform) => void;
-  className?: string;
+  location?: string | undefined;
+  format?: "Square" | "Portrait 4:5" | "Story" | string | undefined;
+  showPlatformToggle?: boolean | undefined;
+  onPlatformChange?: ((platform: SocialFeedPlatform) => void) | undefined;
+  className?: string | undefined;
 }
 
 export function SocialFeedPreview({

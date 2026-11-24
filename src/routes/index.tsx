@@ -101,7 +101,7 @@ import {
 import { DIYA_LOGO_URL } from "@/lib/branding";
 import { TemplatesView } from "@/components/TemplatesView";
 import { TEMPLATES, getTemplateById, type TemplateItem } from "@/lib/templates";
-import { getGeoCountries, getGeoStates, getGeoCities, getGeoAreas, generateLocationHashtags } from "@/lib/geoHashtags";
+import { getGeoCountries, getGeoStates, getGeoCities, getGeoAreas, generateLocationHashtags, type GeoCity } from "@/lib/geoHashtags";
 import { searchLocationsLive, fetchLiveCitiesByState, type GeoLocationItem } from "@/lib/geoApiService";
 
 type Page = "Home" | "Create" | "Templates" | "Scheduled" | "Posted" | "Brand kit" | "Accounts" | "Settings";
@@ -334,31 +334,36 @@ function PostPilot() {
     const cachedBizList = getCachedBusinesses();
     const currentBiz = cachedBizList.find((b) => b.id === initialActiveBizId);
     if (currentBiz) {
+      const isDiya = currentBiz.name.toLowerCase().includes("diya") || !currentBiz.logo_url || currentBiz.logo_url.includes("avero_logo_transparent");
       return {
         businessId: currentBiz.id,
         businessName: currentBiz.name,
-        tagline: currentBiz.tagline || "",
+        tagline: currentBiz.tagline || (isDiya ? "Your AI-Powered Marketing Agency" : ""),
         location: (currentBiz as any).location || "Ahmedabad",
         phone: (currentBiz as any).phone || "6355206575",
-        email: (currentBiz as any).email || "averoinnovations@gmail.com",
+        email: (currentBiz as any).email || "sonimeet1075@gmail.com",
         website: (currentBiz as any).website || "https://averoinnovations.com/",
-        colors: currentBiz.brand_colors && currentBiz.brand_colors.length > 0 ? currentBiz.brand_colors : ["#00A896", "#028090", "#05668D", "#02C39A"],
+        colors: currentBiz.brand_colors && currentBiz.brand_colors.length > 0
+          ? currentBiz.brand_colors
+          : isDiya
+            ? ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"]
+            : ["#00A896", "#028090", "#05668D", "#02C39A"],
         font: (currentBiz as any).font || "Work Sans",
-        logoUrl: currentBiz.logo_url || "https://dihikyljbrbidqgelwac.supabase.co/storage/v1/object/public/post-pilot/logos/7d7831d4-8c66-407b-acbc-a2060d66ff00/1792316942214-avero_logo_transparent.png",
-        logoName: "Brand Mark",
+        logoUrl: isDiya ? DIYA_LOGO_URL : (currentBiz.logo_url || DIYA_LOGO_URL),
+        logoName: isDiya ? "Diya AI Logo" : "Brand Mark",
       };
     }
     return {
-      businessName: isMeetSoni ? "Avero Innovations" : "My Workspace",
-      tagline: "Ideas today. Tomorrow together.",
+      businessName: isMeetSoni ? "Diya AI" : "My Workspace",
+      tagline: "Your AI-Powered Marketing Agency",
       location: "Ahmedabad",
       phone: "6355206575",
-      email: "averoinnovations@gmail.com",
+      email: "sonimeet1075@gmail.com",
       website: "https://averoinnovations.com/",
-      colors: ["#00A896", "#028090", "#05668D", "#02C39A"],
+      colors: ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"],
       font: "Work Sans",
-      logoUrl: "https://dihikyljbrbidqgelwac.supabase.co/storage/v1/object/public/post-pilot/logos/7d7831d4-8c66-407b-acbc-a2060d66ff00/1792316942214-avero_logo_transparent.png",
-      logoName: "Brand Mark",
+      logoUrl: DIYA_LOGO_URL,
+      logoName: "Diya AI Logo",
     };
   });
 
@@ -449,20 +454,26 @@ function PostPilot() {
       let newBrandKit = brandKit;
       if (bRes?.success && bRes.business) {
         const b = bRes.business;
+        const isDiya = b.name.toLowerCase().includes("diya") || !b.logo_url || b.logo_url.includes("avero_logo_transparent");
         newBrandKit = {
           businessId: b.id,
           businessName: b.name,
-          tagline: b.tagline || "",
+          tagline: b.tagline || (isDiya ? "Your AI-Powered Marketing Agency" : ""),
           location: b.location || "",
           phone: b.phone || "",
           website: (b as any).website || "",
           email: (b as any).email || "",
-          colors: Array.isArray(b.brand_colors) && b.brand_colors.length > 0 ? b.brand_colors : ["Tomato", "Olive"],
+          colors: Array.isArray(b.brand_colors) && b.brand_colors.length > 0
+            ? b.brand_colors
+            : isDiya
+              ? ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"]
+              : ["Tomato", "Olive"],
           font: (b as any).font || "Work Sans",
           tone: b.tone || "Friendly",
           timezone: b.timezone || "Asia/Kolkata",
-          defaultHashtags: b.default_hashtags || "",
-          logoUrl: b.logo_url || undefined,
+          defaultHashtags: b.default_hashtags || (isDiya ? "#DiyaAI, #AIMarketing, #MarketingAgency" : ""),
+          logoUrl: isDiya ? (b.logo_url && !b.logo_url.includes("avero_logo_transparent") ? b.logo_url : DIYA_LOGO_URL) : (b.logo_url || undefined),
+          logoName: isDiya ? "Diya AI Logo" : "Brand Mark",
         };
         setBrandKit(newBrandKit);
       }
@@ -511,6 +522,7 @@ function PostPilot() {
               socialAccountId: p.social_account_id ?? undefined,
               headline: p.headline,
               caption: p.caption,
+              location: p.location ?? undefined,
               date: dateStr,
               time: p.time ? String(p.time).slice(0, 5) : "",
               status: (p.status === "Failed" ? "Draft" : p.status) as PostStatus,
@@ -518,6 +530,7 @@ function PostPilot() {
               theme: p.theme || "tomato",
               price: p.price || "",
               imageUrl: p.image_url ?? undefined,
+              zernioPostId: p.zernio_post_id ?? undefined,
             };
           });
           setPosts(newPosts);
@@ -750,7 +763,7 @@ function PostPilot() {
               <DiyaLogo
                 align="center"
                 markClassName="h-7 sm:h-8"
-                textClassName="text-[9px] sm:text-[10px] tracking-[0.24em]"
+                textClassName="text-[10.5px] sm:text-[11.5px] tracking-[0.22em]"
               />
             </button>
           </div>
@@ -1105,8 +1118,8 @@ function PostPilot() {
                 onSwitchBusiness={handleSwitchBusiness}
                 onOpenAddBusiness={() => setAddBusinessModalOpen(true)}
                 onPublished={(post) => {
-                  const safeDate = post.date instanceof Date
-                    ? post.date.toISOString().slice(0, 10)
+                  const safeDate = (post.date as any) instanceof Date
+                    ? (post.date as any).toISOString().slice(0, 10)
                     : (post.date ? String(post.date).slice(0, 10) : "");
                   const cleanPost = {
                     ...post,
@@ -1178,10 +1191,10 @@ function PostPilot() {
                               tagline: updated.tagline,
                               location: updated.location,
                               phone: updated.phone,
-                              website: updated.website,
-                              email: updated.email,
+                              website: updated.website || "",
+                              email: updated.email || "",
                               brand_colors: updated.colors,
-                              logo_url: updated.logoUrl,
+                              logo_url: updated.logoUrl ?? null,
                             }
                           : b
                       );
@@ -1579,7 +1592,7 @@ function Dashboard({
     return posts.filter((post) => {
       if (post.status !== "Posted") return false;
       if (!post.date) return false;
-      const dateStr = post.date instanceof Date ? post.date.toISOString().slice(0, 10) : String(post.date);
+      const dateStr = (post.date as any) instanceof Date ? (post.date as any).toISOString().slice(0, 10) : String(post.date);
       const match = dateStr.match(/^(\d{4})-(\d{2})/);
       if (match && match[1] && match[2]) {
         const postYear = parseInt(match[1], 10);
@@ -3182,7 +3195,7 @@ function CreateFlow({
                           <span className="text-xs font-semibold text-foreground block">Logo</span>
                           {brandKit.logoUrl ? (
                             <div className="mt-1 flex items-center gap-2">
-                              <img src={brandKit.logoUrl} alt="Logo" className="h-6 w-6 rounded-md object-contain bg-white p-0.5" />
+                              <img src={brandKit.logoUrl} alt="Logo" className="h-6 w-6 rounded-md object-contain bg-slate-900/60 border border-white/10 p-0.5" />
                               <span className="text-[11px] text-muted-foreground truncate">{brandKit.logoName || "Brand Mark"}</span>
                             </div>
                           ) : (
@@ -4388,7 +4401,7 @@ function PublishStep({
     const currentCountryObj = geoCountries.find((c) => c.id === geoCountry);
     const timer = setTimeout(() => {
       setIsSearchingLive(true);
-      searchLocationsLive(query, { countryCode: currentCountryObj?.code })
+      searchLocationsLive(query, currentCountryObj?.code ? { countryCode: currentCountryObj.code } : undefined)
         .then((items) => {
           setLiveLocationSearchResults(items);
         })
@@ -4453,7 +4466,7 @@ function PublishStep({
     return generateLocationHashtags({
       countryId: geoCountry,
       stateCode: geoState !== "all" ? geoState : undefined,
-      cityId: geoCity,
+      cityId: geoCity || undefined,
       areaId: geoArea || undefined,
       customLocation: postLocation,
     });
@@ -5425,14 +5438,37 @@ function ScheduledPage({
   const [view, setView] = useState<"list" | "calendar">("list");
   const [month, setMonth] = useState(() => new Date());
   const scheduled = posts.filter((post) => post.status === "Scheduled").sort((a, b) => {
-    const aDate = a.date instanceof Date ? a.date.toISOString().slice(0, 10) : String(a.date || "");
-    const bDate = b.date instanceof Date ? b.date.toISOString().slice(0, 10) : String(b.date || "");
+    const aDate = (a.date as any) instanceof Date ? (a.date as any).toISOString().slice(0, 10) : String(a.date || "");
+    const bDate = (b.date as any) instanceof Date ? (b.date as any).toISOString().slice(0, 10) : String(b.date || "");
     return `${aDate} ${a.time || ""}`.localeCompare(`${bDate} ${b.time || ""}`);
   });
   const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
   const firstDay = new Date(month.getFullYear(), month.getMonth(), 1).getDay();
   const monthLabel = month.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const shiftMonth = (amount: number) => setMonth(new Date(month.getFullYear(), month.getMonth() + amount, 1));
+
+  const handleCancelPost = async (post: SocialPost) => {
+    try {
+      const { cancelPost } = await import("@/api/posts");
+      await cancelPost({ data: { id: post.id } });
+    } catch (err) {
+      console.warn("[ScheduledPage] cancelPost server error:", err);
+    }
+    onChange(posts.filter((item) => item.id !== post.id));
+    toast.success("Scheduled post cancelled");
+  };
+
+  const handleReschedulePost = async (post: SocialPost, nextDate: string, nextTime?: string) => {
+    const finalTime = nextTime || post.time || "09:00";
+    try {
+      const { reschedulePost } = await import("@/api/posts");
+      await reschedulePost({ data: { id: post.id, date: nextDate, time: finalTime } });
+    } catch (err) {
+      console.warn("[ScheduledPage] reschedulePost server error:", err);
+    }
+    onChange(posts.map((item) => (item.id === post.id ? { ...item, date: nextDate, time: finalTime } : item)));
+    toast.success("Post rescheduled");
+  };
 
   return (
     <>
@@ -5491,8 +5527,8 @@ function ScheduledPage({
                 key={post.id}
                 post={post}
                 businessName={businessName}
-                onReschedule={(nextDate) => onChange(posts.map((item) => item.id === post.id ? { ...item, date: nextDate } : item))}
-                onCancel={() => { onChange(posts.filter((item) => item.id !== post.id)); toast.success("Scheduled post cancelled"); }}
+                onReschedule={(nextDate, nextTime) => handleReschedulePost(post, nextDate, nextTime)}
+                onCancel={() => handleCancelPost(post)}
                 onSelectPost={onSelectPost}
               />
             ))
@@ -5508,7 +5544,7 @@ function ScheduledPage({
           {Array.from({ length: firstDay + daysInMonth }, (_, index) => {
             const day = index - firstDay + 1;
             const matches = scheduled.filter((post) => {
-              const dStr = post.date instanceof Date ? post.date.toISOString().slice(0, 10) : String(post.date || "");
+              const dStr = (post.date as any) instanceof Date ? (post.date as any).toISOString().slice(0, 10) : String(post.date || "");
               return (
                 Number(dStr.slice(-2)) === day &&
                 Number(dStr.slice(5, 7)) === month.getMonth() + 1 &&
@@ -5545,12 +5581,14 @@ function ScheduledRow({
 }: {
   post: SocialPost;
   businessName: string;
-  onReschedule: (date: string) => void;
-  onCancel: () => void;
+  onReschedule: (date: string, time: string) => void | Promise<void>;
+  onCancel: () => void | Promise<void>;
   onSelectPost?: ((post: SocialPost) => void) | undefined;
 }) {
   const [editing, setEditing] = useState(false);
   const [date, setDate] = useState(post.date);
+  const [time, setTime] = useState(post.time ? String(post.time).slice(0, 5) : "09:00");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const displayDate = formatPostDate(post.date, post.time);
 
   return (
@@ -5603,21 +5641,63 @@ function ScheduledRow({
         <Button variant="outline" size="sm" className="h-9 rounded-xl text-xs" onClick={() => setEditing(!editing)}>
           {editing ? "Close" : "Reschedule"}
         </Button>
-        <Button variant="ghost" size="sm" className="h-9 rounded-xl text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onCancel}>
-          Cancel
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-9 rounded-xl text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+          disabled={isSubmitting}
+          onClick={async () => {
+            setIsSubmitting(true);
+            try {
+              await onCancel();
+            } finally {
+              setIsSubmitting(false);
+            }
+          }}
+        >
+          {isSubmitting ? "Cancelling..." : "Cancel"}
         </Button>
       </div>
       {editing && (
         <div
-          className="flex items-end gap-2.5 border-t border-white/[0.08] pt-3 sm:col-span-3"
+          className="flex flex-wrap items-end gap-3 border-t border-white/[0.08] pt-3 sm:col-span-3"
           onClick={(e) => e.stopPropagation()}
         >
-          <label className="text-xs text-muted-foreground font-medium">
+          <label className="text-xs text-muted-foreground font-medium flex-1 min-w-[150px]">
             New scheduled date
-            <Input className="mt-1.5 h-9 rounded-xl" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+            <Input
+              className="mt-1.5 h-9 rounded-xl [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:brightness-0 [&::-webkit-calendar-picker-indicator]:invert cursor-pointer"
+              type="date"
+              value={date}
+              onClick={(e) => e.currentTarget.showPicker?.()}
+              onChange={(event) => setDate(event.target.value)}
+            />
           </label>
-          <Button size="sm" className="h-9 rounded-xl" onClick={() => { onReschedule(date); setEditing(false); toast.success("Post rescheduled"); }}>
-            Save date
+          <label className="text-xs text-muted-foreground font-medium flex-1 min-w-[130px]">
+            New scheduled time
+            <Input
+              className="mt-1.5 h-9 rounded-xl [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:brightness-0 [&::-webkit-calendar-picker-indicator]:invert cursor-pointer"
+              type="time"
+              value={time}
+              onClick={(e) => e.currentTarget.showPicker?.()}
+              onChange={(event) => setTime(event.target.value)}
+            />
+          </label>
+          <Button
+            size="sm"
+            className="h-9 rounded-xl px-4 font-medium"
+            disabled={isSubmitting}
+            onClick={async () => {
+              setIsSubmitting(true);
+              try {
+                await onReschedule(date, time);
+                setEditing(false);
+              } finally {
+                setIsSubmitting(false);
+              }
+            }}
+          >
+            {isSubmitting ? "Saving..." : "Save changes"}
           </Button>
         </div>
       )}
@@ -5880,13 +5960,13 @@ function BrandKit({
   data: BrandKitData;
   onSave: (updated: BrandKitData) => void;
 }) {
-  const [name, setName] = useState(data.businessName || "Avero Innovations");
+  const [name, setName] = useState(data.businessName || "Diya AI");
   const [tagline, setTagline] = useState(data.tagline || "");
   const [location, setLocation] = useState(data.location || "");
   const [phone, setPhone] = useState(data.phone || "");
   const [website, setWebsite] = useState(data.website || "");
   const [email, setEmail] = useState(data.email || "");
-  const [colors, setColors] = useState<string[]>(data.colors && data.colors.length > 0 ? data.colors : ["#00A896", "#028090", "#05668D", "#02C39A"]);
+  const [colors, setColors] = useState<string[]>(data.colors && data.colors.length > 0 ? data.colors : ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"]);
   const [font, setFont] = useState(data.font || "Work Sans");
   const [logoName, setLogoName] = useState(data.logoName || "");
   const [logoUrl, setLogoUrl] = useState(data.logoUrl || "");
@@ -5902,7 +5982,7 @@ function BrandKit({
     setPhone(data.phone || "");
     setWebsite(data.website || "");
     setEmail(data.email || "");
-    setColors(data.colors && data.colors.length > 0 ? data.colors : ["#00A896", "#028090", "#05668D", "#02C39A"]);
+    setColors(data.colors && data.colors.length > 0 ? data.colors : ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"]);
     setFont(data.font || "Work Sans");
     setLogoName(data.logoName || "");
     setLogoUrl(data.logoUrl || "");
@@ -5927,7 +6007,7 @@ function BrandKit({
     }
     const updated: BrandKitData = {
       businessId: data.businessId,
-      businessName: name.trim() || "Avero Innovations",
+      businessName: name.trim() || "Diya AI",
       tagline: tagline.trim(),
       location: location.trim(),
       phone: phone.trim(),

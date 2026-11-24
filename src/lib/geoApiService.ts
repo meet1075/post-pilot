@@ -207,7 +207,7 @@ export async function lookupPostalCodeLive(
  */
 export async function searchLocationsLive(
   query: string,
-  options?: { countryCode?: string }
+  options?: { countryCode?: string | undefined } | undefined
 ): Promise<GeoLocationItem[]> {
   const q = query.trim();
   if (!q || q.length < 2) return [];
