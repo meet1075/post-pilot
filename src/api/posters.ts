@@ -587,43 +587,105 @@ export async function compositeLogoOnFlyer(
   const flyerMeta = await sharp(flyerBuffer).metadata();
   const flyerW = flyerMeta.width || (format === "Square" ? 1024 : format === "Story" ? 1024 : 1024);
 
-  // Process logo: check corner pixels and remove solid black or white backgrounds
+  // Process logo: check corner pixels and remove solid, light, or dark backgrounds cleanly
   const logoSharp = sharp(logoBuffer);
   const { data, info } = await logoSharp.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
 
-  const cornerR = data[0] ?? 0;
-  const cornerG = data[1] ?? 0;
-  const cornerB = data[2] ?? 0;
-  const isBlackBg = cornerR < 25 && cornerG < 25 && cornerB < 25;
-  const isWhiteBg = cornerR > 230 && cornerG > 230 && cornerB > 230;
+  // Universal background extraction: sample 4 corners + edge points
+  const getPixel = (x: number, y: number): [number, number, number, number] => {
+    const clampedX = Math.min(info.width - 1, Math.max(0, x));
+    const clampedY = Math.min(info.height - 1, Math.max(0, y));
+    const idx = (clampedY * info.width + clampedX) * 4;
+    return [data[idx] ?? 0, data[idx + 1] ?? 0, data[idx + 2] ?? 0, data[idx + 3] ?? 0];
+  };
 
-  if (isBlackBg) {
+  const samplePoints: Array<[number, number, number, number]> = [
+    getPixel(0, 0),
+    getPixel(info.width - 1, 0),
+    getPixel(0, info.height - 1),
+    getPixel(info.width - 1, info.height - 1),
+    getPixel(Math.floor(info.width / 2), 0),
+    getPixel(0, Math.floor(info.height / 2)),
+    getPixel(info.width - 1, Math.floor(info.height / 2)),
+  ];
+
+  // If corners are already transparent (e.g. transparent PNG), skip background removal
+  const hasOpaqueBg = samplePoints.filter((p) => p[3] > 200).length >= 4;
+
+  if (hasOpaqueBg) {
+    const opaqueSamples = samplePoints.filter((p) => p[3] > 200);
+    const avgR = opaqueSamples.reduce((s, p) => s + p[0], 0) / opaqueSamples.length;
+    const avgG = opaqueSamples.reduce((s, p) => s + p[1], 0) / opaqueSamples.length;
+    const avgB = opaqueSamples.reduce((s, p) => s + p[2], 0) / opaqueSamples.length;
+
     for (let i = 0; i < data.length; i += 4) {
-      if (data[i]! < 25 && data[i + 1]! < 25 && data[i + 2]! < 25) {
+      const r = data[i]!;
+      const g = data[i + 1]!;
+      const b = data[i + 2]!;
+
+      // Euclidean distance to corner background color
+      const distToCorner = Math.sqrt((r - avgR) ** 2 + (g - avgG) ** 2 + (b - avgB) ** 2);
+      // Light desaturated background check (handles beige, off-white, light gray gradients)
+      const isLightDesaturated = r > 155 && g > 145 && b > 135 && Math.abs(r - g) < 35 && Math.abs(g - b) < 35;
+      // Dark/black background check
+      const isDarkBg = r < 45 && g < 45 && b < 45;
+
+      if (distToCorner < 40 || isLightDesaturated || isDarkBg) {
         data[i + 3] = 0; // Transparent
-      }
-    }
-  } else if (isWhiteBg) {
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i]! > 230 && data[i + 1]! > 230 && data[i + 2]! > 230) {
-        data[i + 3] = 0; // Transparent
+      } else if (distToCorner < 55) {
+        // Soft feather edge for smooth anti-aliased blending
+        const feather = (distToCorner - 40) / 15;
+        data[i + 3] = Math.round(data[i + 3]! * feather);
       }
     }
   }
 
-  const maxW = format === "Story" ? 320 : 280;
-  const maxH = format === "Story" ? 95 : 80;
-
-  const trimmedLogo = await sharp(data, {
+  // Trim transparent padding so bounding box hugs the real logo artwork/emblem/text
+  const trimmedSharp = sharp(data, {
     raw: { width: info.width, height: info.height, channels: 4 },
-  })
-    .trim()
-    .resize({ width: maxW, height: maxH, fit: "inside" })
+  }).trim();
+
+  const trimmedMeta = await trimmedSharp.metadata();
+  const trimmedW = trimmedMeta.width || info.width;
+  const trimmedH = trimmedMeta.height || info.height;
+  const trimmedAspect = trimmedW / Math.max(1, trimmedH);
+
+  // Dynamically compute optimal logo size based on aspect ratio and format
+  let targetW = 260;
+  let targetH = 110;
+
+  if (format === "Story") {
+    if (trimmedAspect > 3.0) {
+      targetW = 320;
+      targetH = 80;
+    } else if (trimmedAspect > 1.8) {
+      targetW = 280;
+      targetH = 115;
+    } else {
+      targetW = 220;
+      targetH = 135;
+    }
+  } else {
+    // Portrait 4:5 or Square 1:1
+    if (trimmedAspect > 3.0) {
+      targetW = 280;
+      targetH = 75;
+    } else if (trimmedAspect > 1.8) {
+      targetW = 250;
+      targetH = 105;
+    } else {
+      targetW = 200;
+      targetH = 125;
+    }
+  }
+
+  const trimmedLogo = await trimmedSharp
+    .resize({ width: targetW, height: targetH, fit: "inside" })
     .png()
     .toBuffer({ resolveWithObject: true });
 
   const left = Math.max(0, Math.round((flyerW - trimmedLogo.info.width) / 2));
-  const top = format === "Story" ? 110 : (format === "Square" ? 50 : 60);
+  const top = format === "Story" ? 90 : (format === "Square" ? 45 : 55);
 
   return await sharp(flyerBuffer)
     .composite([{ input: trimmedLogo.data, top, left }])
