@@ -296,7 +296,13 @@ Target Format & Aspect Ratio: "${format}" (${formatInstruction})${namedProduct ?
       if (refUrlForVision) {
         try {
           let imageUrlForVision = refUrlForVision;
-          if (refUrlForVision.startsWith("http")) {
+          if (refUrlForVision.startsWith("/")) {
+            const localPath = path.resolve(process.cwd(), "public", refUrlForVision.replace(/^\/+/, ""));
+            if (fs.existsSync(localPath)) {
+              const buf = fs.readFileSync(localPath);
+              imageUrlForVision = `data:image/png;base64,${buf.toString("base64")}`;
+            }
+          } else if (refUrlForVision.startsWith("http")) {
             const fetchRef = await fetch(refUrlForVision, { signal: AbortSignal.timeout(8000) });
             if (fetchRef.ok) {
               const buf = Buffer.from(await fetchRef.arrayBuffer());
@@ -562,6 +568,13 @@ export async function compositeLogoOnFlyer(
   if (logoUrl.startsWith("data:")) {
     const base64Data = logoUrl.replace(/^data:image\/\w+;base64,/, "");
     logoBuffer = Buffer.from(base64Data, "base64");
+  } else if (logoUrl.startsWith("/")) {
+    const localPath = path.resolve(process.cwd(), "public", logoUrl.replace(/^\/+/, ""));
+    if (fs.existsSync(localPath)) {
+      logoBuffer = fs.readFileSync(localPath);
+    } else {
+      throw new Error(`Local logo file not found: ${localPath}`);
+    }
   } else {
     const res = await fetch(logoUrl, { signal: AbortSignal.timeout(12_000) });
     if (!res.ok) {
@@ -832,6 +845,11 @@ CRITICAL TEXT INTEGRITY: Render ONLY the quoted text exactly as written. Ensure 
       if (refUrl.startsWith("data:")) {
         const base64Data = refUrl.replace(/^data:image\/\w+;base64,/, "");
         refBuffer = Buffer.from(base64Data, "base64");
+      } else if (refUrl.startsWith("/")) {
+        const localPath = path.resolve(process.cwd(), "public", refUrl.replace(/^\/+/, ""));
+        if (fs.existsSync(localPath)) {
+          refBuffer = fs.readFileSync(localPath);
+        }
       } else {
         const fetchRef = await fetch(refUrl, { signal: AbortSignal.timeout(15_000) });
         if (fetchRef.ok) {
@@ -1229,6 +1247,12 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
             if (brandRow.caption_tone) brandTone = brandRow.caption_tone;
             if (brandRow.colors?.length) brandColors = brandRow.colors;
             if (brandRow.logo_public_url) logoUrl = brandRow.logo_public_url;
+            const wantsDiyaLogo = /\bdiya(?:\s*ai)?\b/i.test(data.instruction || "") || businessName.toLowerCase().includes("diya");
+            if (wantsDiyaLogo && (!logoUrl || logoUrl.includes("avero"))) {
+              logoUrl = "/diya-logo.png";
+            } else if (!logoUrl) {
+              logoUrl = "/diya-logo.png";
+            }
           }
         }
       } catch {
@@ -1519,7 +1543,13 @@ export const generatePosters = createServerFn({ method: "POST" })
       const location = passedBrand?.location || brandRow?.location || "";
 
       // Selected business logo: prioritize brand kit updated logo, passed brand logo, or business logo
-      const logoUrl = passedBrand?.logo_url || brandRow?.logo_public_url || null;
+      let logoUrl = passedBrand?.logo_url || brandRow?.logo_public_url || null;
+      const wantsDiyaLogo = /\bdiya(?:\s*ai)?\b/i.test(parsed.data.prompt || "") || businessName.toLowerCase().includes("diya");
+      if (wantsDiyaLogo && (!logoUrl || logoUrl.includes("avero"))) {
+        logoUrl = "/diya-logo.png";
+      } else if (!logoUrl) {
+        logoUrl = "/diya-logo.png";
+      }
 
       const apiKey = getOpenAiApiKey();
       const options: PosterOption[] = [];

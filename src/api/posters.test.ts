@@ -467,5 +467,22 @@ Supercharge your brand's social media marketing with AI. Create, manage, schedul
       expect(meta.format).toBe("png");
       expect(composited.length).toBeGreaterThan(0);
     });
+
+    it("composites a local relative path logo (/diya-logo.png) onto a flyer canvas", async () => {
+      const dummyFlyer = await sharp({
+        create: {
+          width: 1024,
+          height: 1280,
+          channels: 4,
+          background: { r: 15, g: 15, b: 20, alpha: 1 },
+        },
+      }).png().toBuffer();
+
+      const composited = await compositeLogoOnFlyer(dummyFlyer, "/diya-logo.png", "Portrait 4:5");
+      const meta = await sharp(composited).metadata();
+      expect(meta.width).toBe(1024);
+      expect(meta.height).toBe(1280);
+      expect(composited.length).toBeGreaterThan(0);
+    });
   });
 });
