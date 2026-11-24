@@ -36,10 +36,10 @@ model Business {
   ownerUserId        String?            @map("owner_user_id")
   name               String
   tagline            String             @default("")
-  location           String             @default("")
-  phone              String             @default("")
-  website            String             @default("")
-  email              String             @default("")
+  location           String?            @default("")
+  phone              String?            @default("")
+  website            String?            @default("")
+  email              String?            @default("")
   timezone           String             @default("UTC")
   businessType       String             @default("restaurant") @map("business_type")
   logoUrl            String?            @map("logo_url")
@@ -76,12 +76,12 @@ model BrandKit {
   font            String    @default("Fraunces")
   logoR2Key       String?   @map("logo_r2_key")
   logoPublicUrl   String?   @map("logo_public_url")
-  captionTone     String    @default("Friendly") @map("caption_tone")
-  defaultHashtags String    @default("") @map("default_hashtags")
-  website         String    @default("")
-  email           String    @default("")
-  phone           String    @default("")
-  location        String    @default("")
+  captionTone     String?   @default("Friendly") @map("caption_tone")
+  defaultHashtags String?   @default("") @map("default_hashtags")
+  website         String?   @default("")
+  email           String?   @default("")
+  phone           String?   @default("")
+  location        String?   @default("")
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
