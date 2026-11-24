@@ -5447,14 +5447,15 @@ function ScheduledPage({
     toast.success("Scheduled post cancelled");
   };
 
-  const handleReschedulePost = async (post: SocialPost, nextDate: string) => {
+  const handleReschedulePost = async (post: SocialPost, nextDate: string, nextTime?: string) => {
+    const finalTime = nextTime || post.time || "09:00";
     try {
       const { reschedulePost } = await import("@/api/posts");
-      await reschedulePost({ data: { id: post.id, date: nextDate, time: post.time } });
+      await reschedulePost({ data: { id: post.id, date: nextDate, time: finalTime } });
     } catch (err) {
       console.warn("[ScheduledPage] reschedulePost server error:", err);
     }
-    onChange(posts.map((item) => (item.id === post.id ? { ...item, date: nextDate } : item)));
+    onChange(posts.map((item) => (item.id === post.id ? { ...item, date: nextDate, time: finalTime } : item)));
     toast.success("Post rescheduled");
   };
 
@@ -5515,7 +5516,7 @@ function ScheduledPage({
                 key={post.id}
                 post={post}
                 businessName={businessName}
-                onReschedule={(nextDate) => handleReschedulePost(post, nextDate)}
+                onReschedule={(nextDate, nextTime) => handleReschedulePost(post, nextDate, nextTime)}
                 onCancel={() => handleCancelPost(post)}
                 onSelectPost={onSelectPost}
               />
@@ -5569,12 +5570,13 @@ function ScheduledRow({
 }: {
   post: SocialPost;
   businessName: string;
-  onReschedule: (date: string) => void | Promise<void>;
+  onReschedule: (date: string, time: string) => void | Promise<void>;
   onCancel: () => void | Promise<void>;
   onSelectPost?: ((post: SocialPost) => void) | undefined;
 }) {
   const [editing, setEditing] = useState(false);
   const [date, setDate] = useState(post.date);
+  const [time, setTime] = useState(post.time ? String(post.time).slice(0, 5) : "09:00");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const displayDate = formatPostDate(post.date, post.time);
 
@@ -5647,28 +5649,44 @@ function ScheduledRow({
       </div>
       {editing && (
         <div
-          className="flex items-end gap-2.5 border-t border-white/[0.08] pt-3 sm:col-span-3"
+          className="flex flex-wrap items-end gap-3 border-t border-white/[0.08] pt-3 sm:col-span-3"
           onClick={(e) => e.stopPropagation()}
         >
-          <label className="text-xs text-muted-foreground font-medium">
+          <label className="text-xs text-muted-foreground font-medium flex-1 min-w-[150px]">
             New scheduled date
-            <Input className="mt-1.5 h-9 rounded-xl" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+            <Input
+              className="mt-1.5 h-9 rounded-xl [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:brightness-0 [&::-webkit-calendar-picker-indicator]:invert cursor-pointer"
+              type="date"
+              value={date}
+              onClick={(e) => e.currentTarget.showPicker?.()}
+              onChange={(event) => setDate(event.target.value)}
+            />
+          </label>
+          <label className="text-xs text-muted-foreground font-medium flex-1 min-w-[130px]">
+            New scheduled time
+            <Input
+              className="mt-1.5 h-9 rounded-xl [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:filter [&::-webkit-calendar-picker-indicator]:brightness-0 [&::-webkit-calendar-picker-indicator]:invert cursor-pointer"
+              type="time"
+              value={time}
+              onClick={(e) => e.currentTarget.showPicker?.()}
+              onChange={(event) => setTime(event.target.value)}
+            />
           </label>
           <Button
             size="sm"
-            className="h-9 rounded-xl"
+            className="h-9 rounded-xl px-4 font-medium"
             disabled={isSubmitting}
             onClick={async () => {
               setIsSubmitting(true);
               try {
-                await onReschedule(date);
+                await onReschedule(date, time);
                 setEditing(false);
               } finally {
                 setIsSubmitting(false);
               }
             }}
           >
-            {isSubmitting ? "Saving..." : "Save date"}
+            {isSubmitting ? "Saving..." : "Save changes"}
           </Button>
         </div>
       )}
