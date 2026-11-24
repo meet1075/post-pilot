@@ -1365,7 +1365,7 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
       let tagline = "Your AI-Powered Marketing Agency";
       let brandColors = ["#00E5FF", "#7C3AED", "#2563EB", "#06B6D4"];
       let brandTone = "Premium";
-      let logoUrl: string | null = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v4.png";
+      let logoUrl: string | null = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v5.png";
 
       try {
         const session = await requireAuth();
@@ -1395,7 +1395,7 @@ export const editPosterWithAi = createServerFn({ method: "POST" })
             if (brandRow.colors?.length) brandColors = brandRow.colors;
             if (brandRow.logo_public_url) logoUrl = brandRow.logo_public_url;
             if (!logoUrl && (businessName.toLowerCase().includes("diya") || data.instruction?.toLowerCase().includes("diya ai"))) {
-              logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v4.png";
+              logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v5.png";
             }
             if (logoUrl) {
               try {
@@ -1690,7 +1690,7 @@ export const generatePosters = createServerFn({ method: "POST" })
       // Selected business logo: prioritize brand kit updated logo, passed brand logo, or business logo
       let logoUrl = passedBrand?.logo_url || brandRow?.logo_public_url || null;
       if (!logoUrl || logoUrl.includes("avero_logo_transparent")) {
-        logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v4.png";
+        logoUrl = "https://pub-f951b9a0f9b3407c901fb638d50404db.r2.dev/branding/diya-logo-v5.png";
       }
 
       // Dynamically extract brand colors directly from the logo if available

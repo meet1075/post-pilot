@@ -763,7 +763,7 @@ function PostPilot() {
               <DiyaLogo
                 align="center"
                 markClassName="h-7 sm:h-8"
-                textClassName="text-[9px] sm:text-[10px] tracking-[0.24em]"
+                textClassName="text-[10.5px] sm:text-[11.5px] tracking-[0.22em]"
               />
             </button>
           </div>
